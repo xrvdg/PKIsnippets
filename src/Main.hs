@@ -36,7 +36,9 @@ doquery = do
 
 -- [[file:~/projecten/PKI/src/Main.org::*GUI][GUI:1]]
 main :: IO ()
-main = startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} setup
+main = do 
+  BS.writeFile "henk.json" (encode testSG)
+  startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} setup
 
 setup :: Window -> UI ()
 setup w = void $ do
@@ -47,14 +49,13 @@ setup w = void $ do
   sgm <- mkElement "script" # set (attr "src") "/static/sigma.js/build/sigma.min.js"
   sp <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.parsers.json.min.js"
 
-  bla <- mkElement "script" # set html (" sigma.parsers.json('/static/data.json', {" <>
-    "container: 'sg'," <>
-    "settings: {" <>
-    "defaultNodeColor: '#ec5148'}});")
+  let js = BS.unpack $ encode testSG
+
+  bla <- mkElement "script" # set html ("var s = new sigma('sg');\n" <>
+   "s.graph.read(" ++ js ++ ");\n" <>
+   "s.refresh();")
 
   st <- mkElement "style" # set (attr "type") "text/css" # set html  "#sg {max-width: 400px; height: 400px; margin: auto;}"
-  let js = BS.unpack $ encode testSG
-  sh <- mkElement "script" # set html ("var g = " ++ js ++ ";\n var s = new sigma({graph: g, container: 'sg'});\n")
   getBody w #+ [element s, element sgm, element sp, element graph, element bla]
   getHead w #+ [element st]
   return ()
@@ -95,7 +96,7 @@ instance ToJSON SEdge where
   toJSON (SE id source target) = object ["id" .= ("e" ++ show id), "source" .= ("n"++ show source), "target" .= ("n" ++ show target)]
 
 instance ToJSON SNode where
-  toJSON (SN id label) = object ["id" .= ("n" ++ show id), "label" .= label, "color" .= ("#ccc" :: T.Text), "x" .= (20 :: Int), "y" .= (30 :: Int), "size" .= (10 :: Int)]
+  toJSON (SN id label) = object ["id" .= ("n" ++ show id), "label" .= label, "x" .= (20 :: Int), "y" .= (30 :: Int), "size" .= (10 :: Int)]
 -- sigma.js:1 ends here
 
 

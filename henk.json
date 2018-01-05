@@ -1,0 +1,1 @@
+{"edges":[{"source":"n1","id":"e1","target":"n2"}],"nodes":[{"size":10,"id":"n1","x":20,"label":"Henk","y":30},{"size":10,"id":"n2","x":20,"label":"Frits","y":30},{"size":10,"id":"n3","x":20,"label":"Barend","y":30}]}
