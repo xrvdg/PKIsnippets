@@ -48,23 +48,26 @@ doquery = do
   setup :: Window -> UI ()
   setup w = void $ do
     return w # set title "test neo4j"
-    graph <- GUT.div # set id_ "sg" # set style [("margin", "auto")] # set html "<script>var s = new sigma('sg');</script>"
+    graph <- GUT.div # set id_ "sg" # set style [("margin", "auto")]
     s <- string "Hello world"
     b <- button # set text "Appear"
     
     let js = BS.unpack $ encode testSG
     let command = ("s.graph.clear();\n" <>
                    "s.graph.read(" ++ js ++ ");\n" <>
-                   "s.refresh();")
+                   "s.refresh();\n" <>
+                   "s.startNoverlap();")
 
     on click b (\a -> runFunction $ ffi command)
-  
+
+ 
     sgm <- mkElement "script" # set (attr "src") "/static/sigma.js/build/sigma.min.js"
-    sp <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.parsers.json.min.js"
-    
+    sset <- mkElement "script" # set (attr "src") "/static/src/sig.js"
+    slayout <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.layout.noverlap.min.js"
+    sani <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.plugins.animate.min.js"
 
     st <- mkElement "style" # set (attr "type") "text/css" # set html  "#sg {max-width: 400px; height: 400px; margin: auto;}"
-    getBody w #+ [element s, element sgm, element sp, element graph, element b]
+    getBody w #+ [element graph, element s, element sgm, element sani, element slayout, element sset, element b]
     getHead w #+ [element st]
     return ()
 
@@ -72,6 +75,8 @@ doquery = do
 
 sigma moet maar een keer worden aangeroepen anders wordt er steeds weer een canvas aan de div toegevoegd.
 De clear is waarschijnlijk ook nodig doordat alle parser die read gebruiken dit er ook bij hebben.
+
+De volgorde waarin de script worden geladen is belangrijk. Anders bestaan sommige element niet.
 
 * Datastructures
 :PROPERTIES:
@@ -116,9 +121,8 @@ instance ToJSON SNode where
   toJSON (SN id label) = object ["id" .= id, "label" .= label, "x" .= (20 :: Int), "y" .= (30 :: Int), "size" .= (10 :: Int)]
 #+end_src
 
-De nodes hebben wel echt een positie nodig anders worden ze niet getekend.
+De nodes hebben wel echt een positie nodig anders worden ze niet getekend. Ook wanneer er sprake is van nooverlap
 Het maken van een node moet pas gebeuren wanneer de browser geheel is geladen.
-De browser merkt het laden van extra script niet helemaal op.
 
 In het voorbeeld op de site maken ze gebruik van aparte identifiers voor edges en nodes. We hanteren eerst Ints en zien wel of we ze ook op dit level moeten onderscheiden.
 

@@ -43,23 +43,26 @@ main = do
 setup :: Window -> UI ()
 setup w = void $ do
   return w # set title "test neo4j"
-  graph <- GUT.div # set id_ "sg" # set style [("margin", "auto")] # set html "<script>var s = new sigma('sg');</script>"
+  graph <- GUT.div # set id_ "sg" # set style [("margin", "auto")]
   s <- string "Hello world"
   b <- button # set text "Appear"
 
   let js = BS.unpack $ encode testSG
   let command = ("s.graph.clear();\n" <>
                  "s.graph.read(" ++ js ++ ");\n" <>
-                 "s.refresh();")
+                 "s.refresh();\n" <>
+                 "s.startNoverlap();")
 
   on click b (\a -> runFunction $ ffi command)
 
-  sgm <- mkElement "script" # set (attr "src") "/static/sigma.js/build/sigma.min.js"
-  sp <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.parsers.json.min.js"
 
+  sgm <- mkElement "script" # set (attr "src") "/static/sigma.js/build/sigma.min.js"
+  sset <- mkElement "script" # set (attr "src") "/static/src/sig.js"
+  slayout <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.layout.noverlap.min.js"
+  sani <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.plugins.animate.min.js"
 
   st <- mkElement "style" # set (attr "type") "text/css" # set html  "#sg {max-width: 400px; height: 400px; margin: auto;}"
-  getBody w #+ [element s, element sgm, element sp, element graph, element b]
+  getBody w #+ [element graph, element s, element sgm, element sani, element slayout, element sset, element b]
   getHead w #+ [element st]
   return ()
 -- GUI:1 ends here
