@@ -43,20 +43,23 @@ main = do
 setup :: Window -> UI ()
 setup w = void $ do
   return w # set title "test neo4j"
-  graph <- GUT.div # set id_ "sg" # set style [("margin", "auto")]
+  graph <- GUT.div # set id_ "sg" # set style [("margin", "auto")] # set html "<script>var s = new sigma('sg');</script>"
   s <- string "Hello world"
+  b <- button # set text "Appear"
+
+  let js = BS.unpack $ encode testSG
+  let command = ("s.graph.clear();\n" <>
+                 "s.graph.read(" ++ js ++ ");\n" <>
+                 "s.refresh();")
+
+  on click b (\a -> runFunction $ ffi command)
 
   sgm <- mkElement "script" # set (attr "src") "/static/sigma.js/build/sigma.min.js"
   sp <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.parsers.json.min.js"
 
-  let js = BS.unpack $ encode testSG
-
-  bla <- mkElement "script" # set html ("var s = new sigma('sg');\n" <>
-   "s.graph.read(" ++ js ++ ");\n" <>
-   "s.refresh();")
 
   st <- mkElement "style" # set (attr "type") "text/css" # set html  "#sg {max-width: 400px; height: 400px; margin: auto;}"
-  getBody w #+ [element s, element sgm, element sp, element graph, element bla]
+  getBody w #+ [element s, element sgm, element sp, element graph, element b]
   getHead w #+ [element st]
   return ()
 -- GUI:1 ends here
@@ -93,13 +96,17 @@ instance ToJSON SG where
   toJSON (SG n e) = object ["nodes" .= toJSON n, "edges" .= toJSON e]
 
 instance ToJSON SEdge where
-  toJSON (SE id source target) = object ["id" .= ("e" ++ show id), "source" .= ("n"++ show source), "target" .= ("n" ++ show target)]
+  toJSON (SE id source target) = object ["id" .= id, "source" .= source, "target" .= target]
 
 instance ToJSON SNode where
-  toJSON (SN id label) = object ["id" .= ("n" ++ show id), "label" .= label, "x" .= (20 :: Int), "y" .= (30 :: Int), "size" .= (10 :: Int)]
+  toJSON (SN id label) = object ["id" .= id, "label" .= label, "x" .= (20 :: Int), "y" .= (30 :: Int), "size" .= (10 :: Int)]
 -- sigma.js:1 ends here
 
 
+
+-- De nodes hebben wel echt een positie nodig anders worden ze niet getekend.
+-- Het maken van een node moet pas gebeuren wanneer de browser geheel is geladen.
+-- De browser merkt het laden van extra script niet helemaal op.
 
 -- In het voorbeeld op de site maken ze gebruik van aparte identifiers voor edges en nodes. We hanteren eerst Ints en zien wel of we ze ook op dit level moeten onderscheiden.
 
