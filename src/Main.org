@@ -9,6 +9,7 @@ Het andere experiment wat hiermee wordt aangegaan is vanaf het begin programmere
 * Imports 
 #+begin_src haskell :tangle ./Main.hs :comments both
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecursiveDo #-}
 module Main where
 import Data.Default
 import qualified Database.Bolt as B
@@ -45,12 +46,42 @@ doquery = do
 #+begin_src haskell 
   main :: IO ()
   main = do 
-    BS.writeFile "henk.json" (encode testSG)
     startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} setup
 
   setup :: Window -> UI ()
   setup w = void $ do
     return w # set title "test neo4j"
+    sigmael <- createSigma
+    parentinput <- createInputField "pinput" "Parent" 
+    getBody w #+ [element sigmael, element parentinput]
+    
+#+end_src
+
+** input
+De GUI output is vrijwel hetzelfde voor het invoeren van een nieuwe node voor alleenstaand, child, parent en relatie.
+De tekst verschilt een beetje maar het is vooral de actie die verschilt.
+
+
+#+begin_src haskell
+  -- classid, text, functie
+  createInputField :: T.Text -> T.Text -> UI Element
+  createInputField classid msg = mdo
+    g <- GUT.div # set id_ (T.unpack classid)
+    b <- button # set text "add"
+
+    uinput <- entry binput
+
+    binput <- stepper "" . rumors $ userText uinput
+    debugstring <- string "Nothing"
+    sink text (facts $ userText uinput) (element debugstring)
+    element g #+ [string (T.unpack msg), element uinput,element b, element debugstring] 
+#+end_src
+** sigmajs
+
+#+begin_src haskell
+  createSigma :: UI Element
+  createSigma = do
+    g <- GUT.div # set id_ "scontainer"
     graph <- GUT.div # set id_ "sg" # set style [("margin", "auto")]
     s <- string "Hello world"
     b <- button # set text "Appear"
@@ -63,17 +94,13 @@ doquery = do
 
     on click b (\a -> runFunction $ ffi command)
 
- 
     sgm <- mkElement "script" # set (attr "src") "/static/sigma.js/build/sigma.min.js"
     sset <- mkElement "script" # set (attr "src") "/static/src/sig.js"
     slayout <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.layout.noverlap.min.js"
     sani <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.plugins.animate.min.js"
 
     st <- mkElement "style" # set (attr "type") "text/css" # set html  "#sg {max-width: 400px; height: 400px; margin: auto;}"
-    getBody w #+ [element graph, element s, element sgm, element sani, element slayout, element sset, element b]
-    getHead w #+ [element st]
-    return ()
-
+    element g #+ [element st, element graph, element s, element sgm, element sani, element slayout, element sset, element b]
 #+end_src
 
 sigma moet maar een keer worden aangeroepen anders wordt er steeds weer een canvas aan de div toegevoegd.
@@ -86,14 +113,6 @@ De volgorde waarin de script worden geladen is belangrijk. Anders bestaan sommig
 :header-args: :tangle ./Main.hs :comments both
 :END:
 
-#+begin_src haskell
-data Movie = Movie {tit :: T.Text, released :: Int}
-data Person = Person {name :: T.Text, born :: Int}
-#+end_src
-
-Het is mogelijk voor een node om meerdere labels te hebben. Nu gebruik ik labels als zekerheid dat ze bepaalde data hebben.
-Weet niet zeker hoe verstandig dat is.
-
 Zijn labels ieders aparte dingen zoals nu, of is het beter om het te modelleren als de ADT en dat een node meerdere van deze labels kan hebben.
 
 Dat gebeurt echter ook wel als we aan de hasbolt interface blijven zitten. Het huidige is misschien beter om de data te transformeren.
@@ -103,6 +122,7 @@ We maken een data structuur voor sigma.js die we eenvoudig van en naar JSON kunn
 Hoewel we waarschijnlijk ongerichte grafen blijven tekenen, kent sigmajs wel source and target id en wij hanteren het ook om tijdens het coden consistent te blijven.
 
 #+begin_src haskell
+
 data SG = SG [SNode] [SEdge]
 
 type ID = Int
