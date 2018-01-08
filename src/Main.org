@@ -53,7 +53,7 @@ doquery = do
   setup p w = void $ do
     return w # set title "test neo4j"
     sigmael <- createSigma
-    parentinput <- createInputField p "pinput" "Parent" 
+    parentinput <- createInputField p "pnew" "New: " 
     getBody w #+ [element sigmael, element parentinput]
     
 #+end_src
@@ -72,11 +72,11 @@ De tekst verschilt een beetje maar het is vooral de actie die verschilt.
     uinput <- entry binput
     binput <- stepper "" (head <$> unions [rumors $ userText uinput, pure "" <@ (click b)])
 
-    debugstring <- string "Nothing"
-    bdone <- stepper "" (binput <@ click b)
-    sink text bdone (element debugstring)
 
-    element g #+ [string (T.unpack msg), element uinput,element b, element debugstring] 
+    let q = \a -> B.query ("CREATE (n: Concept{longtitle: \"" <> (T.pack a) <> "\"} )")
+    on ((binput <@) . click) b (\a -> liftIO $ B.run p (q a))
+
+    element g #+ [string (T.unpack msg), element uinput,element b] 
 #+end_src
 
 *** TODO make widget
