@@ -23,9 +23,12 @@ import Data.Monoid ((<>))
 * Neo4j
 
 #+begin_src haskell :tangle ./Main.hs :comments both
+
+settings = def {B.user="neo4j", B.password="pki2018"}
+
 doquery :: IO ()
 doquery = do
-  pipe <- B.connect $ def {B.user="neo4j", B.password="pki2018"}
+  pipe <- B.connect settings
   let q = B.query "match (movie:Movie) return movie limit 4;"
   res <- B.run pipe q
   print res
