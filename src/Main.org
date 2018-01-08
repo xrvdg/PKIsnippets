@@ -53,7 +53,7 @@ doquery = do
   setup p w = void $ do
     return w # set title "test neo4j"
     sigmael <- createSigma
-    parentinput <- createInputField p "pnew" "New: " 
+    parentinput <- textform "pnew" "New: " 
     getBody w #+ [element sigmael, element parentinput]
     
 #+end_src
@@ -62,24 +62,38 @@ doquery = do
 De GUI output is vrijwel hetzelfde voor het invoeren van een nieuwe node voor alleenstaand, child, parent en relatie.
 De tekst verschilt een beetje maar het is vooral de actie die verschilt.
 
+Ervoor gekozen dat het submitten het event is, wel sturen we de text mee. 
+
+Voorheen was het idee om de nog niet submitted input het event te maken zodat autocompletion kan worden gedaan.
+Maar dat is wellicht meer voor binnen een widget zelf en niet buiten een widget.
 #+begin_src haskell
-  -- classid, text, functie
-  createInputField :: B.Pipe -> T.Text -> T.Text -> UI Element
-  createInputField p classid msg = mdo
-    g <- GUT.div # set id_ (T.unpack classid)
-    b <- button # set text "add"
+data TextForm = TF { elemTF :: Element, userTF :: Tidings T.Text} 
 
-    uinput <- entry binput
-    binput <- stepper "" (head <$> unions [rumors $ userText uinput, pure "" <@ (click b)])
+submitted :: TextForm -> Tidings T.Text
+submitted = userTF 
 
+instance Widget TextForm where
+  getElement = elemTF 
 
-    let q = \a -> B.query ("CREATE (n: Concept{longtitle: \"" <> (T.pack a) <> "\"} )")
-    on ((binput <@) . click) b (\a -> liftIO $ B.run p (q a))
+--    let q = \a -> B.query ("CREATE (n: Concept{longtitle: \"" <> (T.pack a) <> "\"} )")
+--   on ((binput <@) . click) b (\a -> liftIO $ B.run p (q a))
 
-    element g #+ [string (T.unpack msg), element uinput,element b] 
+-- classid, text, functie
+textform :: T.Text -> T.Text -> UI TextForm
+textform classid msg = mdo
+  g <- GUT.div # set id_ (T.unpack classid)
+  b <- button # set text "Add"
+
+  uinput <- entry binput
+  let einput = rumors $ userText uinput
+  binput <- stepper "" (head <$> unions [einput , "" <$ click b])
+
+  element g #+ [string (T.unpack msg), element uinput,element b] 
+  return $ TF g (tidings (T.pack <$> binput) (T.pack <$> einput))
 #+end_src
 
-*** TODO make widget
+NOTE: dit had waarschijnlijk ook gemaakt kunnen worden met een html form.
+NOTE: misschien is het beter als het alleen een event is. Nu heeft het state buiten het submitten om.
 
 ** sigmajs
 

@@ -2,6 +2,7 @@
 
 -- [[file:~/projecten/PKI/src/Main.org::*Imports][Imports:1]]
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecursiveDo #-}
 module Main where
 import Data.Default
 import qualified Database.Bolt as B
@@ -17,9 +18,11 @@ import Data.Monoid ((<>))
 
 
 -- [[file:~/projecten/PKI/src/Main.org::*Neo4j][Neo4j:1]]
+settings = def {B.user="neo4j", B.password="pki2018"}
+
 doquery :: IO ()
 doquery = do
-  pipe <- B.connect $ def {B.user="neo4j", B.password="pki2018"}
+  pipe <- B.connect settings
   let q = B.query "match (movie:Movie) return movie limit 4;"
   res <- B.run pipe q
   print res
@@ -37,12 +40,59 @@ doquery = do
 -- [[file:~/projecten/PKI/src/Main.org::*GUI][GUI:1]]
 main :: IO ()
 main = do 
-  BS.writeFile "henk.json" (encode testSG)
-  startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} setup
+  pipe <- B.connect settings
+  startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} (setup pipe)
 
-setup :: Window -> UI ()
-setup w = void $ do
+setup :: B.Pipe -> Window -> UI ()
+setup p w = void $ do
   return w # set title "test neo4j"
+  sigmael <- createSigma
+  parentinput <- textform "pnew" "New: " 
+  getBody w #+ [element sigmael, element parentinput]
+-- GUI:1 ends here
+
+-- input
+-- De GUI output is vrijwel hetzelfde voor het invoeren van een nieuwe node voor alleenstaand, child, parent en relatie.
+-- De tekst verschilt een beetje maar het is vooral de actie die verschilt.
+
+-- Ervoor gekozen dat het submitten het event is, wel sturen we de text mee. 
+
+-- Voorheen was het idee om de nog niet submitted input het event te maken zodat autocompletion kan worden gedaan.
+-- Maar dat is wellicht meer voor binnen een widget zelf en niet buiten een widget.
+
+-- [[file:~/projecten/PKI/src/Main.org::*input][input:1]]
+data TextForm = TF { elemTF :: Element, userTF :: Tidings T.Text} 
+
+submitted :: TextForm -> Tidings T.Text
+submitted = userTF 
+
+instance Widget TextForm where
+  getElement = elemTF 
+
+--    let q = \a -> B.query ("CREATE (n: Concept{longtitle: \"" <> (T.pack a) <> "\"} )")
+--   on ((binput <@) . click) b (\a -> liftIO $ B.run p (q a))
+
+-- classid, text, functie
+textform :: T.Text -> T.Text -> UI TextForm
+textform classid msg = mdo
+  g <- GUT.div # set id_ (T.unpack classid)
+  b <- button # set text "Add"
+
+  uinput <- entry binput
+  let einput = rumors $ userText uinput
+  binput <- stepper "" (head <$> unions [einput , "" <$ click b])
+
+  element g #+ [string (T.unpack msg), element uinput,element b] 
+  return $ TF g (tidings (T.pack <$> binput) (T.pack <$> einput))
+-- input:1 ends here
+
+-- sigmajs
+
+
+-- [[file:~/projecten/PKI/src/Main.org::*sigmajs][sigmajs:1]]
+createSigma :: UI Element
+createSigma = do
+  g <- GUT.div # set id_ "scontainer"
   graph <- GUT.div # set id_ "sg" # set style [("margin", "auto")]
   s <- string "Hello world"
   b <- button # set text "Appear"
@@ -55,28 +105,14 @@ setup w = void $ do
 
   on click b (\a -> runFunction $ ffi command)
 
-
   sgm <- mkElement "script" # set (attr "src") "/static/sigma.js/build/sigma.min.js"
   sset <- mkElement "script" # set (attr "src") "/static/src/sig.js"
   slayout <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.layout.noverlap.min.js"
   sani <- mkElement "script" # set (attr "src") "/static/sigma.js/build/plugins/sigma.plugins.animate.min.js"
 
   st <- mkElement "style" # set (attr "type") "text/css" # set html  "#sg {max-width: 400px; height: 400px; margin: auto;}"
-  getBody w #+ [element graph, element s, element sgm, element sani, element slayout, element sset, element b]
-  getHead w #+ [element st]
-  return ()
--- GUI:1 ends here
-
--- Datastructures
--- :PROPERTIES:
--- :header-args: :tangle ./Main.hs :comments both
--- :END:
-
-
--- [[file:~/projecten/PKI/src/Main.org::*Datastructures][Datastructures:1]]
-data Movie = Movie {tit :: T.Text, released :: Int}
-data Person = Person {name :: T.Text, born :: Int}
--- Datastructures:1 ends here
+  element g #+ [element st, element graph, element s, element sgm, element sani, element slayout, element sset, element b]
+-- sigmajs:1 ends here
 
 -- sigma.js
 -- We maken een data structuur voor sigma.js die we eenvoudig van en naar JSON kunnen maken.
@@ -107,9 +143,8 @@ instance ToJSON SNode where
 
 
 
--- De nodes hebben wel echt een positie nodig anders worden ze niet getekend.
+-- De nodes hebben wel echt een positie nodig anders worden ze niet getekend. Ook wanneer er sprake is van nooverlap
 -- Het maken van een node moet pas gebeuren wanneer de browser geheel is geladen.
--- De browser merkt het laden van extra script niet helemaal op.
 
 -- In het voorbeeld op de site maken ze gebruik van aparte identifiers voor edges en nodes. We hanteren eerst Ints en zien wel of we ze ook op dit level moeten onderscheiden.
 
