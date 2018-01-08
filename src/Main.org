@@ -46,13 +46,14 @@ doquery = do
 #+begin_src haskell 
   main :: IO ()
   main = do 
-    startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} setup
+    pipe <- B.connect settings
+    startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} (setup pipe)
 
-  setup :: Window -> UI ()
-  setup w = void $ do
+  setup :: B.Pipe -> Window -> UI ()
+  setup p w = void $ do
     return w # set title "test neo4j"
     sigmael <- createSigma
-    parentinput <- createInputField "pinput" "Parent" 
+    parentinput <- createInputField p "pinput" "Parent" 
     getBody w #+ [element sigmael, element parentinput]
     
 #+end_src
@@ -61,21 +62,25 @@ doquery = do
 De GUI output is vrijwel hetzelfde voor het invoeren van een nieuwe node voor alleenstaand, child, parent en relatie.
 De tekst verschilt een beetje maar het is vooral de actie die verschilt.
 
-
 #+begin_src haskell
   -- classid, text, functie
-  createInputField :: T.Text -> T.Text -> UI Element
-  createInputField classid msg = mdo
+  createInputField :: B.Pipe -> T.Text -> T.Text -> UI Element
+  createInputField p classid msg = mdo
     g <- GUT.div # set id_ (T.unpack classid)
     b <- button # set text "add"
 
     uinput <- entry binput
+    binput <- stepper "" (head <$> unions [rumors $ userText uinput, pure "" <@ (click b)])
 
-    binput <- stepper "" . rumors $ userText uinput
     debugstring <- string "Nothing"
-    sink text (facts $ userText uinput) (element debugstring)
+    bdone <- stepper "" (binput <@ click b)
+    sink text bdone (element debugstring)
+
     element g #+ [string (T.unpack msg), element uinput,element b, element debugstring] 
 #+end_src
+
+*** TODO make widget
+
 ** sigmajs
 
 #+begin_src haskell
@@ -157,18 +162,57 @@ testSG = SG [SN 1 "Henk", SN 2 "Frits", SN 3 "Barend"] [SE 1 1 2]
 
 
 
+* Knowledge graph
+** introduction
+Een node in het netwerk kan een concept (C) of relation omschrijven (R). 
+Er is geen hard verschil tussen deze twee dingen een relatie is voornamelijk anders doordat we niet vereisen dat deze een naam heeft.
+Wanneer een naam toch nodig wordt dan kan een relation worden gelift naar een concept.
+
+De terminologie staat nog niet helemaal vast.
+
+Binnen dit systeem is er een verschil tussen een relation en een edge. Een relation is een extra node die het mogelijk maakt om meerdere soorten nodes (concepts en relations) aan elkaar te kunnen linken om een rijkere context te kunnen creëren.
+
+** datastructure
+Er mag geen overlap zitten tussen ID van C en R in de database doordat het als gelijke soort data wordt gezien.
+
+#+begin_src haskell
+type LongName = T.Text
+data Node = C LongName T.Text | R T.Text
+
+data NeoNode = NN ID Node
+data NeoRel = NR ID ID ID 
+#+end_src 
+
+Voor nu maken we gebruik van eenvoudige relaties, maar in de toekomst moet er ruimte zijn om vermoedens en dergelijken aan te kunnen geven.
+Verder hanteren we alleen een LongName op het moment. In de toekomst moet er ook een shortname komen zodat we de namen bij nodes klein kunnen houden.
+
+Het idee van de longname is dat we deze ook uniek kunnen houden.
+
+Ook zet de huidige methode het geheel vast op één label. We moeten eens kijken of dit te limiterend werkt.
+
+* Conversion
+Vanuit Neo4j hasbolt krijgen we eerst een blob data van het type record
+#+begin_src haskell :export none
+type Record = Map Text Value
+#+end_src
+
+Waar Text de naam van de identifier is die je hebt gebruikt in je query en value een structuur is. In deze structuur wordt er geen onderscheid gemaakt tussen primitieve datatypes, nodes en edges.
+Daarvoor gebruik je de "exact" functie die onderdeel uitmaakt van de recordtypes typeclass.
+
+Stap één is dus ook het converteren van deze ongestructureerde data naar nodes en relationships.
 
 
+collect function en dan een toNodes schrijven
 
-
-
-
-
-
-
-
-
-
-
-
-
+* TODOs
+** invoer
+*** database connection
+*** DONE GUI
+    CLOSED: [2018-01-08 Mon 15:28]
+*** parent
+*** child
+*** friendship
+** zoeken
+** DONE data verwijderen uit database
+   CLOSED: [2018-01-08 Mon 14:37]
+** test data invoeren
