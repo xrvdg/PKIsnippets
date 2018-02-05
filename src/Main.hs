@@ -12,6 +12,7 @@ import Control.Monad
 import Data.Aeson
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Data.Monoid ((<>))
+import Control
 -- Imports:1 ends here
 
 -- Neo4j
@@ -47,8 +48,7 @@ setup :: B.Pipe -> Window -> UI ()
 setup p w = void $ do
   return w # set title "test neo4j"
   sigmael <- createSigma
-  parentinput <- textform "pnew" "New: " 
-  getBody w #+ [element sigmael, element parentinput]
+  getBody w #+ [element sigmael, controlView]
 -- GUI:1 ends here
 
 -- input

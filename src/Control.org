@@ -10,27 +10,45 @@ The currently selected node is always interesting for the other parts, the updat
 
 #+begin_src haskell
 {-# LANGUAGE OverloadedStrings #-}
-module Control
+{-# LANGUAGE RecursiveDo #-}
+
+module Control (
   controlView
+)
 where
 
 import qualified Data.Text as T
 import Graphics.UI.Threepenny
+import Debug
 
-data AddRemoveForm = ARF Element
+data Operations = ADD T.Text | RM T.Text deriving Show
+
+data AddRemoveForm = ARF {elemARF :: Element, ev :: Event Operations}
 
 mkAddRemove :: T.Text -> UI AddRemoveForm
-mkAddRemove title = do f <- form
-                       header <- string (T.unpack title)
-                       text <- input # set type_ "text" 
-                       add <- input # set value "add" # set type_ "submit"
-                       remove <- input # set value "remove" # set type_ "submit"
-                       element f #+ [element header, element text, element add, element remove]
-                       return (ARF f)
+mkAddRemove title = mdo 
+                         f <- new # set class_ "addremove"
+                         header <- string (T.unpack title)
+
+                         add <- button # set text "add" 
+                         remove <- button # set text "remove" 
+
+                         uinput <- entry binput
+                         let einput = rumors $ userText uinput
+                         binput <- stepper "" einput 
+
+                         let eoutput = head <$> unions [ADD <$> T.pack <$> binput <@ click add, RM <$> T.pack <$> binput <@ click remove]
+
+                         lastAction <- stepper "" (show <$> eoutput)
+                         
+                         db <- debugString "Nothing"
+                         sink text lastAction (element db)
+
+                         element f #+ [element header, element uinput, element add, element remove, element db]
+                         return (ARF f eoutput)
 
 instance Widget AddRemoveForm where
-  getElement (ARF e) = e
-
+  getElement = elemARF
 
 controlView :: UI Element
 controlView = do regular <- mkAddRemove "regular"
