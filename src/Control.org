@@ -1,0 +1,41 @@
+* Controller
+:PROPERTIES:
+:header-args: :tangle ./Control.hs :comments both
+:END:
+
+This module is responsible for registering actions that change the state of the module. 
+
+This module communicates to the Text en Graph part by sending the currently selected node and whether or not the underlying database has been updated.
+The currently selected node is always interesting for the other parts, the update might or might not change the the neighbouring GUI elements.
+
+#+begin_src haskell
+{-# LANGUAGE OverloadedStrings #-}
+module Control
+  controlView
+where
+
+import qualified Data.Text as T
+import Graphics.UI.Threepenny
+
+data AddRemoveForm = ARF Element
+
+mkAddRemove :: T.Text -> UI AddRemoveForm
+mkAddRemove title = do f <- form
+                       header <- string (T.unpack title)
+                       text <- input # set type_ "text" 
+                       add <- input # set value "add" # set type_ "submit"
+                       remove <- input # set value "remove" # set type_ "submit"
+                       element f #+ [element header, element text, element add, element remove]
+                       return (ARF f)
+
+instance Widget AddRemoveForm where
+  getElement (ARF e) = e
+
+
+controlView :: UI Element
+controlView = do regular <- mkAddRemove "regular"
+                 parent <- mkAddRemove "parent"
+                 child <- mkAddRemove "child"
+                 relation <- mkAddRemove "relation"
+                 new #+ [element regular, element parent, element child, element relation]
+#+end_src
