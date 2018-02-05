@@ -8,6 +8,7 @@ This module is responsible for registering actions that change the state of the 
 This module communicates to the Text en Graph part by sending the currently selected node and whether or not the underlying database has been updated.
 The currently selected node is always interesting for the other parts, the update might or might not change the the neighbouring GUI elements.
 
+** imports etc
 #+begin_src haskell
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecursiveDo #-}
@@ -20,42 +21,86 @@ where
 import qualified Data.Text as T
 import Graphics.UI.Threepenny
 import Debug
+import qualified Forms.AddRemove as ARF
+#+end_src
 
-data ADDRM = ADD String | RM String deriving Show
+** Operations
+The forms are used for multiple operations in controlView these form get a meaning assigned to them.
 
-data AddRemoveForm = ARF {elemARF :: Element, ev :: Event ADDRM}
+Where in ADD the second is dependent on the first.
 
-mkAddRemove :: T.Text -> UI AddRemoveForm
-mkAddRemove title = mdo 
-                         f <- new # set class_ "addremove"
-                         header <- string (T.unpack title)
+#+begin_src haskell
 
-                         add <- button # set text "add" 
-                         remove <- button # set text "remove" 
-                         let eadd = click add
-                             eremove = click remove
-
-                         uinput <- entry binput
-                         let einput = rumors $ userText uinput
-                         binput <- stepper "" einput 
-
-                         let eoutput = head <$> unions [ADD <$> binput <@ eadd, RM <$> binput <@ eremove]
-
-                         lastAction <- stepper "" (show <$> eoutput)
-                         
-                         db <- debugString "Nothing"
-                         sink text lastAction (element db)
-
-                         element f #+ [element header, element uinput, element add, element remove, element db]
-                         return (ARF f eoutput)
-
-instance Widget AddRemoveForm where
-  getElement = elemARF
+data Operation = Select String | Remove String | AddRel String String | RmRel String String deriving Show
 
 controlView :: UI Element
-controlView = do regular <- mkAddRemove "regular"
-                 parent <- mkAddRemove "parent"
-                 child <- mkAddRemove "child"
-                 relation <- mkAddRemove "relation"
+controlView = do regular <- ARF.mkAddRemove "regular"
+                 bCurrent <- stepper Nothing (ARF.getText ARF.isADD <$> ARF.ev regular)
+                 parent <- ARF.mkAddRemove "parent"
+                 child <- ARF.mkAddRemove "child"
+                 relation <- ARF.mkAddRemove "relation"
                  new #+ [element regular, element parent, element child, element relation]
+#+end_src
+
+* Form
+
+#+begin_src haskell :tangle ./Forms/AddRemove.hs :comments both
+  {-# LANGUAGE RecursiveDo #-}
+  module Forms.AddRemove (
+    isADD,
+    isRM,
+    getText,
+    mkAddRemove,
+    ev
+  )
+  where
+
+  import Graphics.UI.Threepenny
+  import Debug
+
+  data ADDRM = ADD String | RM String deriving Show
+
+  isADD :: ADDRM -> Bool
+  isADD (ADD e) = True
+  isADD _ = False
+
+  isRM :: ADDRM -> Bool
+  isRM (RM e) = True
+  isRM _ = False
+
+  getText :: (ADDRM -> Bool) -> ADDRM -> Maybe String
+  getText p op = if p op then Just (getText' op) else Nothing
+
+  getText' :: ADDRM -> String
+  getText' (ADD str) = str
+  getText' (RM str) = str
+
+  data AddRemoveForm = ARF {elemARF :: Element, ev :: Event ADDRM}
+
+  mkAddRemove :: String -> UI AddRemoveForm
+  mkAddRemove title = mdo 
+                           f <- new # set class_ "addremove"
+                           header <- string title 
+
+                           add <- button # set text "add" 
+                           remove <- button # set text "remove" 
+                           let eadd = click add
+                               eremove = click remove
+
+                           uinput <- entry binput
+                           let einput = rumors $ userText uinput
+                           binput <- stepper "" einput 
+
+                           let eoutput = head <$> unions [ADD <$> binput <@ eadd, RM <$> binput <@ eremove]
+
+                           lastAction <- stepper "" (show <$> eoutput)
+                         
+                           db <- debugString "Nothing"
+                           sink text lastAction (element db)
+
+                           element f #+ [element header, element uinput, element add, element remove, element db]
+                           return (ARF f eoutput)
+
+  instance Widget AddRemoveForm where
+    getElement = elemARF
 #+end_src
