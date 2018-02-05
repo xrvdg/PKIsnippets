@@ -21,9 +21,9 @@ import qualified Data.Text as T
 import Graphics.UI.Threepenny
 import Debug
 
-data Operations = ADD T.Text | RM T.Text deriving Show
+data ADDRM = ADD String | RM String deriving Show
 
-data AddRemoveForm = ARF {elemARF :: Element, ev :: Event Operations}
+data AddRemoveForm = ARF {elemARF :: Element, ev :: Event ADDRM}
 
 mkAddRemove :: T.Text -> UI AddRemoveForm
 mkAddRemove title = mdo 
@@ -32,12 +32,14 @@ mkAddRemove title = mdo
 
                          add <- button # set text "add" 
                          remove <- button # set text "remove" 
+                         let eadd = click add
+                             eremove = click remove
 
                          uinput <- entry binput
                          let einput = rumors $ userText uinput
                          binput <- stepper "" einput 
 
-                         let eoutput = head <$> unions [ADD <$> T.pack <$> binput <@ click add, RM <$> T.pack <$> binput <@ click remove]
+                         let eoutput = head <$> unions [ADD <$> binput <@ eadd, RM <$> binput <@ eremove]
 
                          lastAction <- stepper "" (show <$> eoutput)
                          
