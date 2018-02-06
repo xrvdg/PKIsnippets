@@ -19,6 +19,7 @@ executable PKI
   main-is:             Main.hs
   -- other-modules:       
   -- other-extensions:    
+  ghc-options:         -threaded
   build-depends:       base
                        , hasbolt
                        , data-default

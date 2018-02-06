@@ -20,6 +20,7 @@ import qualified Data.Text as T
 import Control.Monad 
 import Data.Aeson
 import qualified Data.ByteString.Lazy.Char8 as BS
+import qualified Data.ByteString as BSI
 import Data.Monoid ((<>))
 import Control
 import Control.Concurrent (threadDelay)
@@ -56,17 +57,26 @@ doquery = do
 :header-args: :tangle ./Main.hs :comments both
 :END:
 
+We define our own logger for threepenny gui such that there cannot be race conditions for stderr.
+It seems that snap, the server underlying threepenny gui, does not use the logger when it firsts boots up.
+All the later messages do seem to use it. Looking into the source of threepenny gui seems that threepenny gui does initialize the logger of snap correctly.
+
+The best thing would probably be to not use say in any process that starts before startGUI.
 #+begin_src haskell 
+  logProcess :: Node.LocalNode -> BSI.ByteString -> IO ()
+  logProcess node bs = Node.runProcess node (say ("say: " ++ show bs))
+
   main :: IO ()
   main = do
     backend <- initializeBackend "localhost" "8030" Node.initRemoteTable
     node <- newLocalNode backend
+    let config = defaultConfig {jsStatic = Just ".", jsPort = Just 8200, jsLog = logProcess node} 
     void $ Node.runProcess node $ do
                say "starting db"
                dbpid <- spawnLocal db
                register "db" dbpid
                say "starting startGUI"
-               liftIO $ startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} (setup node)
+               liftIO $ startGUI config (setup node)
 
   setup :: Node.LocalNode -> Window -> UI ()
   setup nid w = void $ do
