@@ -12,16 +12,23 @@ The currently selected node is always interesting for the other parts, the updat
 #+begin_src haskell
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecursiveDo #-}
-
+{-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
 module Control (
   controlView
 )
 where
 
 import qualified Data.Text as T
-import Graphics.UI.Threepenny
+import Graphics.UI.Threepenny as GUT
 import Debug
 import qualified Forms.AddRemove as ARF
+import Control.Distributed.Process.Node
+import Control.Distributed.Process.Serializable
+import Control.Distributed.Process
+import Control.Concurrent (threadDelay)
+import Control.Monad (void)
 #+end_src
 
 ** Operations
@@ -30,21 +37,49 @@ The forms are used for multiple operations in controlView these form get a meani
 Where in ADD the second is dependent on the first.
 
 #+begin_src haskell
+{-
+||| A process server that has a single task.
+-}
+processTask :: Serializable a => (a -> IO b) -> Process ()
+processTask f = do a <- expect
+                   liftIO (f a)
+                   processTask f
 
-data Operation = Select String | Remove String | AddRel String String | RmRel String String deriving Show
+{-
+||| A process server with a single tasks that executes handler when the function is done.
+-}
+handlerProcessTask :: Serializable a => GUT.Handler b -> (a -> IO b) -> Process ()
+handlerProcessTask h f = processTask (\a -> f a >>= h)
 
-controlView :: UI Element
-controlView = do regular <- ARF.mkAddRemove "regular"
+onEventProcess :: Serializable a => LocalNode -> Event a -> (a -> IO b) -> (b -> UI void) -> UI ()
+onEventProcess nid event rf gf = void $  do 
+       (callbackev, fire) <- liftIO newEvent 
+       pid <- liftIO $ forkProcess nid (handlerProcessTask fire rf)
+       onEvent event (\a -> liftIO . runProcess nid $ send pid a)
+       onEvent callbackev gf
+
+data Operation = Select String | Remove String | 
+                 AddLink String String | RmLink String String | 
+                 AddRel String String | RmRel String String deriving Show
+
+controlView :: LocalNode -> UI Element
+controlView ln = do 
+                 regular <- ARF.mkAddRemove "regular"
                  bCurrent <- stepper Nothing (ARF.getText ARF.isADD <$> ARF.ev regular)
                  parent <- ARF.mkAddRemove "parent"
                  child <- ARF.mkAddRemove "child"
                  relation <- ARF.mkAddRemove "relation"
-                 new #+ [element regular, element parent, element child, element relation]
+                 status <- string "No status yet"
+                 let delay = 10000000
+                 onEventProcess ln (ARF.ev regular) (\a -> threadDelay delay >> return  (show a ++ show delay)) (\b -> element status # set text b)
+                 new #+ [element status, element regular, element parent, element child, element relation]
 #+end_src
 
 * Form
 
 #+begin_src haskell :tangle ./Forms/AddRemove.hs :comments both
+  {-# LANGUAGE DeriveAnyClass #-}
+  {-# LANGUAGE DeriveGeneric #-}
   {-# LANGUAGE RecursiveDo #-}
   module Forms.AddRemove (
     isADD,
@@ -57,8 +92,12 @@ controlView = do regular <- ARF.mkAddRemove "regular"
 
   import Graphics.UI.Threepenny
   import Debug
+  import GHC.Generics
+  import Data.Binary
+  import Data.Typeable
 
-  data ADDRM = ADD String | RM String deriving Show
+  data ADDRM = ADD String | RM String deriving (Show, Generic, Binary, Typeable)
+
 
   isADD :: ADDRM -> Bool
   isADD (ADD e) = True

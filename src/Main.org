@@ -65,16 +65,14 @@ doquery = do
                say "starting db"
                dbpid <- spawnLocal db
                register "db" dbpid
-               node <- getSelfNode
                say "starting startGUI"
-               liftIO $ startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} setup
+               liftIO $ startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} (setup node)
 
-  setup :: Window -> UI ()
-  setup w = void $ do
+  setup :: Node.LocalNode -> Window -> UI ()
+  setup nid w = void $ do
     return w # set title "test neo4j"
     sigmael <- createSigma
-    getBody w #+ [element sigmael, controlView]
-    
+    getBody w #+ [element sigmael, controlView nid]
 #+end_src
 
 ** input
