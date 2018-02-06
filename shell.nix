@@ -5,7 +5,7 @@ let
   inherit (nixpkgs) pkgs;
 
   f = { mkDerivation, base, data-default, hasbolt, stdenv, text, aeson
-      , threepenny-gui
+      , threepenny-gui, distributed-process, distributed-process-simplelocalnet
       }:
       mkDerivation {
         pname = "PKI";
@@ -15,6 +15,7 @@ let
         isExecutable = true;
         executableHaskellDepends = [
           base data-default hasbolt threepenny-gui text aeson
+          distributed-process distributed-process-simplelocalnet
         ];
         license = stdenv.lib.licenses.gpl3;
       };
