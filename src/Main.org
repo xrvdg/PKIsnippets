@@ -15,13 +15,14 @@ It is still to be decided whether the database actions are going to be handled i
 module Main where
 import Data.Default
 import qualified Database.Bolt as B
-import Graphics.UI.Threepenny as GUT
+import Graphics.UI.Threepenny as GUT hiding (register)
 import qualified Data.Text as T
 import Control.Monad 
 import Data.Aeson
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Data.Monoid ((<>))
 import Control
+import Control.Concurrent (threadDelay)
 import Control.Distributed.Process
 import Control.Distributed.Process.Backend.SimpleLocalnet
 import qualified Control.Distributed.Process.Node as Node
@@ -32,12 +33,17 @@ import qualified Control.Distributed.Process.Node as Node
 
 #+begin_src haskell :tangle ./Main.hs :comments both
 
+db :: Process ()
+db = do say "heartbeat db" 
+        liftIO (threadDelay 60000000)
+        db
+
 settings = def {B.user="neo4j", B.password="pki2018"}
 
 doquery :: IO ()
 doquery = do
   pipe <- B.connect settings
-  let q = B.query "match (movie:Movie) return movie limit 4;"
+  let q = B.query "match (a) return a limit 4;"
   res <- B.run pipe q
   print res
   let first = head res
@@ -53,14 +59,18 @@ doquery = do
 #+begin_src haskell 
   main :: IO ()
   main = do
-  
-    pipe <- B.connect settings
     backend <- initializeBackend "localhost" "8030" Node.initRemoteTable
     node <- newLocalNode backend
-    void $ Node.runProcess node (liftIO $ startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} (setup pipe))
+    void $ Node.runProcess node $ do
+               say "starting db"
+               dbpid <- spawnLocal db
+               register "db" dbpid
+               node <- getSelfNode
+               say "starting startGUI"
+               liftIO $ startGUI defaultConfig {jsStatic = Just ".", jsPort = Just 8200} setup
 
-  setup :: B.Pipe -> Window -> UI ()
-  setup p w = void $ do
+  setup :: Window -> UI ()
+  setup w = void $ do
     return w # set title "test neo4j"
     sigmael <- createSigma
     getBody w #+ [element sigmael, controlView]
