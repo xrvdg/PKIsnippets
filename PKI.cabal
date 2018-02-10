@@ -16,7 +16,7 @@ extra-source-files:  ChangeLog.md, README.org
 cabal-version:       >=1.10
 
 executable PKI
-  main-is:             Main.hs
+  main-is:             Main.lhs
   -- other-modules:       
   -- other-extensions:    
   ghc-options:         -threaded
