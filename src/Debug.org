@@ -1,0 +1,18 @@
+* Debug
+:PROPERTIES:
+:header-args: :tangle ./Debug.hs :comments both
+:END:
+
+This module contains tooling to ease development of the GUI.
+
+#+begin_src haskell
+module Debug (
+  debugString
+)
+where
+
+import Graphics.UI.Threepenny
+
+debugString :: String -> UI Element
+debugString t = string t # set class_ "debug"
+#+end_src
