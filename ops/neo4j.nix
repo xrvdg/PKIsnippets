@@ -14,8 +14,8 @@
     networking.firewall.allowedTCPPorts = [7474 7473];
     services.neo4j =
     { enable = true;
-      services.neo4j.listenAddress = addr;
-      services.neo4j.enableHttps = true;
+      listenAddress = addr;
+      enableHttps = true;
     };
     environment.systemPackages = let pki = pkgs.callPackage ../default.nix {}; in [pki];
   };
