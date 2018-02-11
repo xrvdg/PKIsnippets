@@ -1,14 +1,7 @@
-{pkgs ? import <nixpkgs> {}}:
-let jobs = {
-   build = pkgs.callPackage ./default.nix {};
-   containers = import <nixpkgs/nixos/tests/make-test.nix> ({pkgs, ...} :
-   {
-      name = "container-host";
+{nixpkgs ? import <nixpkgs> {}}:
 
-      machine = {config, pkgs, lib, ...}:
-      {
-
-      };
-   });
+let 
+   jobs = {
+   build = import ./default.nix {inherit nixpkgs;};
   };
 in jobs
