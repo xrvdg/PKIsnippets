@@ -70,6 +70,7 @@
   
   main :: IO ()
   main = do
+    putStrLn "Hello World"
     backend <- initializeBackend "localhost" "8030" Node.initRemoteTable
     node <- newLocalNode backend
     let config = defaultConfig {jsStatic = Just ".", jsPort = Just 8200, jsLog = logProcess node} 

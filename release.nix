@@ -1,7 +1,7 @@
-{nixpkgs ? import <nixpkgs> {}}:
+{pkgs ? import <nixpkgs> {}}:
 
 let 
    jobs = {
-   build = import ./default.nix {inherit nixpkgs;};
+   build = import ./default.nix {};
   };
 in jobs

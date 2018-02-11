@@ -1,8 +1,6 @@
-{ nixpkgs ? import <nixpkgs> {}, compiler ? "default", doBenchmark ? false }:
+{ pkgs ? import <nixpkgs> {}, compiler ? "default", doBenchmark ? false }:
 
 let
-
-  inherit (nixpkgs) pkgs;
 
   f = { mkDerivation, base, data-default, hasbolt, stdenv, text, aeson
       , threepenny-gui, distributed-process, distributed-process-simplelocalnet, binary
