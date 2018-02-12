@@ -1,12 +1,5 @@
+{config, pkgs, ...}:
 {
-  network.description = "neo4j";
-  db = {config, pkgs, ...}:
-  {
-    deployment.targetEnv = "container";
-    deployment.container =
-    {
-      forwardPorts = [{hostPort = 8200;} {hostPort = 7473;} {hostPort = 7474;}];
-    };
     networking.firewall.allowedTCPPorts = [8200 7474 7473];
     services.neo4j =
     {
@@ -25,5 +18,5 @@
       };
       wantedBy = ["multi-user.target"];
     };
-  };
 }
+
