@@ -33,12 +33,12 @@ The configuration is currently empty but is already defined here as a placeholde
 
 \begin{code}
   type AppT = ReaderT ServerState
-  data ServerState = SS {_ps :: ProcessState, _c :: App.Config}
+  data ServerState = SS {_ps :: ProcessState, _w :: Window}
 
---  instance (MonadUI m) => MonadUI (AppT m) where
---    liftUI = liftUI
+  instance (MonadUI m, MonadIO m) => MonadUI (AppT m) where
+    liftUI uia = do w <- asks window
+                    liftIO $ runUI w (liftUI uia)
 
-  data Config
   data ProcessState = PS {_ln :: Node.LocalNode, _p :: Pool Pipe}
 
   localNode :: ServerState -> Node.LocalNode
@@ -46,6 +46,9 @@ The configuration is currently empty but is already defined here as a placeholde
 
   pool :: ServerState -> Pool Pipe
   pool = _p . _ps
+
+  window :: ServerState -> Window
+  window = _w
 \end{code}
 
   TPG has the convention that if the binding address is Nothing it will check look for the environment variable 'ADDR', if that isn't found then '127.0.0.1' is used.
@@ -59,6 +62,10 @@ The configuration is currently empty but is already defined here as a placeholde
   getAddr =  fmap (fromMaybe "127.0.0.1") (lookupEnv "ADDR")
 \end{code}
 
+Rewrite this to something that has a state which also incorperate the window.
+Window is also a state in this application and therefore should also be in the read.
+
+Model this after startGUI.
 \begin{code}
   startApp :: BoltCfg -> (Window -> AppT UI ()) -> IO ()
   startApp bcfg appui = do
@@ -70,8 +77,8 @@ The configuration is currently empty but is already defined here as a placeholde
                                 jsAddr = Just (BSC.pack addr),
                                 jsPort = Just 8200,
                                 jsLog = logProcess node}
-        serverstate = SS {_ps = PS node rpool}
-    Node.runProcess node (liftIO $ startGUI config (\w -> runReaderT (appui w) serverstate))
+        serverstate = SS (PS node rpool)
+    Node.runProcess node (liftIO $ startGUI config (\w -> runReaderT (appui w) (serverstate w)))
 \end{code}
 
 We define our own logger for threepenny gui such that there cannot be race conditions for stderr.
