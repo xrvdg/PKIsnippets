@@ -3,7 +3,7 @@
 let
 
   f = { mkDerivation, base, data-default, hasbolt, stdenv, text, aeson
-      , threepenny-gui, distributed-process, distributed-process-simplelocalnet, binary
+      , threepenny-gui, distributed-process, distributed-process-simplelocalnet, binary, resource-pool
       }:
       mkDerivation {
         pname = "PKI";
@@ -14,7 +14,7 @@ let
         executableHaskellDepends = [
           base data-default hasbolt threepenny-gui text aeson
           distributed-process distributed-process-simplelocalnet
-          binary
+          binary resource-pool
         ];
         license = stdenv.lib.licenses.gpl3;
       };

@@ -41,7 +41,7 @@ getText' (RM str) = str
 data AddRemoveForm = ARF {elemARF :: Element, ev :: Event ADDRM}
 
 mkAddRemove :: String -> UI AddRemoveForm
-mkAddRemove title = mdo 
+mkAddRemove title = mdo
                          f <- new # set class_ "addremove"
                          header <- string title 
 
