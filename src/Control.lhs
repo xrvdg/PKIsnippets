@@ -55,7 +55,7 @@ Process servers are processes that run an IO computation when it receives the ex
          ss <- ask
          let nid = localNode ss
          pid <- liftIO $ forkProcess nid (handlerProcessTask fire (\a -> runReaderT (rf a) ss))
-         liftIO . runUI w  $ do
+         liftUI  $ do
                      onEvent event (liftIO . runProcess nid . send pid)
                      onEvent callbackev gf
 \end{code}
@@ -67,11 +67,11 @@ Process servers are processes that run an IO computation when it receives the ex
 
   controlView :: Window -> AppT UI Element
   controlView w = do
-                   regular <- liftIO. runUI w $ ARF.mkAddRemove "regular"
-                   status <-  liftIO . runUI w $ string "No status yet"
+                   regular <- liftUI $ ARF.mkAddRemove "regular"
+                   status <-  liftUI $ string "No status yet"
                    let delay = 10000000
                    onEventProcess w (ARF.ev regular) (\a -> liftIO (threadDelay delay) >> return  (show a ++ show delay)) (\b -> element status # set text b)
-                   liftIO . runUI w $ do
+                   liftUI $ do
                                bCurrent <- stepper Nothing (ARF.getText ARF.isADD <$> ARF.ev regular)
                                parent <- ARF.mkAddRemove "parent"
                                child <- ARF.mkAddRemove "child"

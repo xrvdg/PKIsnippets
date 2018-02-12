@@ -78,7 +78,7 @@ Model this after startGUI.
                                 jsPort = Just 8200,
                                 jsLog = logProcess node}
         serverstate = SS (PS node rpool)
-    Node.runProcess node (liftIO $ startGUI config (\w -> runReaderT (appui w) (serverstate w)))
+    Node.runProcess node . liftIO $ startGUI config (\w -> runReaderT (appui w) (serverstate w))
 \end{code}
 
 We define our own logger for threepenny gui such that there cannot be race conditions for stderr.
