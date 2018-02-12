@@ -90,7 +90,7 @@ Eventhough that might also be delegated to 'xdg-open'.
   We use the same logic for our the address of our Neo4j server.
 \begin{code}
   getAddr :: IO String
-  getAddr =  liftM (fromMaybe "127.0.0.1") (lookupEnv "ADDR")
+  getAddr =  fmap (fromMaybe "127.0.0.1") (lookupEnv "ADDR")
 
   main :: IO ()
   main = do
@@ -113,41 +113,6 @@ Eventhough that might also be delegated to 'xdg-open'.
     return w # set title "test neo4j"
     sigmael <- createSigma
     getBody w #+ [element sigmael, controlView nid]
-
-  -- input
-  -- De GUI output is vrijwel hetzelfde voor het invoeren van een nieuwe node voor alleenstaand, child, parent en relatie.
-  -- De tekst verschilt een beetje maar het is vooral de actie die verschilt.
-
-  -- Ervoor gekozen dat het submitten het event is, wel sturen we de text mee.
-
-  -- Voorheen was het idee om de nog niet submitted input het event te maken zodat autocompletion kan worden gedaan.
-  -- Maar dat is wellicht meer voor binnen een widget zelf en niet buiten een widget.
-
-  -- [[file:~/projecten/PKI/src/Main.org::*input][input:1]]
-  data TextForm = TF { elemTF :: Element, userTF :: Tidings T.Text}
-
-  submitted :: TextForm -> Tidings T.Text
-  submitted = userTF
-
-  instance Widget TextForm where
-    getElement = elemTF
-
-  --    let q = \a -> B.query ("CREATE (n: Concept{longtitle: \"" <> (T.pack a) <> "\"} )")
-  --   on ((binput <@) . click) b (\a -> liftIO $ B.run p (q a))
-
-  -- classid, text, functie
-  textform :: T.Text -> T.Text -> UI TextForm
-  textform classid msg = mdo
-    g <- GUT.div # set id_ (T.unpack classid)
-    b <- button # set text "Add"
-
-    uinput <- entry binput
-    let einput = rumors $ userText uinput
-    binput <- stepper "" (head <$> unions [einput , "" <$ click b])
-
-    element g #+ [string (T.unpack msg), element uinput,element b]
-    return $ TF g (tidings (T.pack <$> binput) (T.pack <$> einput))
-  -- input:1 ends here
 
   -- sigmajs
 
