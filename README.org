@@ -1,3 +1,5 @@
+[[https://travis-ci.com/xrvdg/PKI.svg?token=jzoL8EbFYz3iyonZxQyt&branch=master]]
+
 The idea behind this project is being able to build your own PKI based on a couple of primitives.
 We try to follow the structure of projects like XMonad. Have a good base configuration such that is well usable.
 And by means of writing your own main you can slowly and steady change the system to fit your liking.
