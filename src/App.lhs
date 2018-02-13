@@ -1,6 +1,5 @@
 \begin{code}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
-{-# LANGUAGE MonoLocalBinds, DeriveDataTypeable, DeriveGeneric #-}
 \end{code}
 \begin{code}
   module App (

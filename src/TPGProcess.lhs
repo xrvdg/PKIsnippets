@@ -1,5 +1,7 @@
 TODO: This section is probably better named as Graphics.UI.Threepenny.Process
-
+\begin{code}
+{-# LANGUAGE MonoLocalBinds, DeriveDataTypeable, DeriveGeneric #-}
+\end{code}
 \begin{code}
   module TPGProcess(
     onEventProcess,
@@ -28,6 +30,7 @@ Can probably be combined into a single class, but still have the same methods.
 Will clean up the onEventProcess signamture.
 
 \begin{code}
+
   class TPGProcessInfo a where
     localNode :: a -> LocalNode
     window :: a -> Window
@@ -64,9 +67,9 @@ TODO: Probably can make a datatype which captures the TPGProcessInfo in its type
   onEventProcess  :: (Serializable a, TPGProcessInfo ss) => Event a -> (ss -> c) -> (a -> ProcessNonUI c b) -> (b -> UI void) -> ReaderT ss UI ()
   onEventProcess event extract rf gf = void $  do
          (callbackev, fire) <- liftIO newEvent
-         ss <- ask
+         cs <- asks extract
          nid <- asks localNode
-         pid <- liftIO $ forkProcess nid (handlerProcessTask fire (\a -> runReaderT (rf a) (extract ss)))
+         pid <- liftIO $ forkProcess nid (handlerProcessTask fire (\a -> runReaderT (rf a) cs))
          liftUI $ do
                      onEvent event (liftIO . runProcess nid . send pid)
                      onEvent callbackev gf
