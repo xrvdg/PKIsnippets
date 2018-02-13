@@ -1,5 +1,6 @@
 \begin{code}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE MonoLocalBinds, DeriveDataTypeable, DeriveGeneric #-}
 \end{code}
 \begin{code}
   module App (
@@ -26,6 +27,8 @@
   import Database.Bolt
   import Data.Maybe (fromMaybe)
   import System.Environment (lookupEnv)
+  import Process
+  import TPGProcess
 \end{code}
     }
 
@@ -33,22 +36,20 @@ The configuration is currently empty but is already defined here as a placeholde
 
 \begin{code}
   type AppT = ReaderT ServerState
+
   data ServerState = SS {_ps :: ProcessState, _w :: Window}
 
-  instance (MonadUI m, MonadIO m) => MonadUI (AppT m) where
-    liftUI uia = do w <- asks window
-                    liftIO $ runUI w (liftUI uia)
 
   data ProcessState = PS {_ln :: Node.LocalNode, _p :: Pool Pipe}
 
-  localNode :: ServerState -> Node.LocalNode
-  localNode = _ln . _ps
+  instance TPGProcessInfo ServerState where
+    localNode = _ln . _ps
+    window = _w
 
   pool :: ServerState -> Pool Pipe
   pool = _p . _ps
 
-  window :: ServerState -> Window
-  window = _w
+
 \end{code}
 
   TPG has the convention that if the binding address is Nothing it will check look for the environment variable 'ADDR', if that isn't found then '127.0.0.1' is used.
@@ -89,3 +90,4 @@ All the later messages do seem to use it. Looking into the source of threepenny 
   logProcess :: Node.LocalNode -> BS.ByteString -> IO ()
   logProcess node bs = Node.runProcess node (say ("say: " ++ show bs))
 \end{code}
+
