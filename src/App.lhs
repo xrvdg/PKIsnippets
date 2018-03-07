@@ -90,3 +90,4 @@ All the later messages do seem to use it. Looking into the source of threepenny 
   logProcess node bs = Node.runProcess node (say ("say: " ++ show bs))
 \end{code}
 
+An example of a pre-processor is to convert your source files to the input

@@ -39,7 +39,11 @@ Will clean up the onEventProcess signamture.
     liftUI uia = do w <- asks window
                     liftIO $ runUI w (liftUI uia)
 \end{code}
-Process servers are processes that run an IO computation when it receives the expected input.
+
+Process servers are processes that run an computation when it receives the expected input.
+
+TODO: determine if this processTask is nicely without the 'Let it crash' philosophy or that it should be a slightly more fault tolerant.
+Might involve changing the handler, because the handler is the precious part. Losing the handler means losing the connection to corresponding TPG-event receiver.
 
 \begin{code}
   -- | A process server that has a single task.
@@ -55,13 +59,12 @@ Process servers are processes that run an IO computation when it receives the ex
 
 \end{code}
 
-Here we require a function which is able to extract the required surroudning/config for its ReaderT from ss.
-These will general be of the form runProcessInContext :: ServerState -> a -> ProcessNonUI
-
-ss -> (a -> ProcessNonUI cb) -> (a -> Process b)
-
 TODO: Probably can make a datatype which captures the TPGProcessInfo in its type such that it does not have to be repeated here.
--> some ReaderT construct.
+-> some ReaderT construct. -> Also requires GADT
+
+TODO: This defininition for onEvent is not very nice yet. Come back to this after the GADT/Dependent types lectures.
+This at least gives a general structure to express the idea.
+A proper solution will probably extract the resource constraining of a process to the process module.
 \begin{code}
   -- | In usage it acts the same as onEvent but rather than running an IO operation in GUI thread it launches a process server for this IO operation.
   onEventProcess  :: (Serializable a, TPGProcessInfo ss) => Event a -> (ss -> c) -> (a -> ProcessNonUI c b) -> (b -> UI void) -> ReaderT ss UI ()
