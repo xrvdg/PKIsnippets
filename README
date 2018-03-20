@@ -1,4 +1,5 @@
 directory structure:
+
 \src 
   Collection of snippets for a effects system that supports concurrency, graph drawing, ThreepennyGUI event handling.
 
@@ -7,3 +8,5 @@ directory structure:
 
 for completeness the sigma.js code is added as submodule.
 Drawing code currently assumes that sigma.js is build in de directory ./sigma.js
+
+Branch: TPGMonadStack should contain the last working version.
