@@ -1,5 +1,6 @@
 \begin{code}
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# language DataKinds #-}
 \end{code}
 \begin{code}
   module App (
@@ -23,18 +24,20 @@
   import qualified Data.ByteString.Char8 as BSC
   import Control.Distributed.Process.Backend.SimpleLocalnet (initializeBackend, newLocalNode)
   import Data.Pool
-  import Database.Bolt
+  import qualified Database.Bolt as DB 
+  import Database.Bolt (Pipe, BoltCfg)
   import Data.Maybe (fromMaybe)
   import System.Environment (lookupEnv)
   import Process
   import TPGProcess
+  import Control.Monad.Freer
 \end{code}
     }
 
 The configuration is currently empty but is already defined here as a placeholder. In the future it will likely contain information about which programs to use; although we might delegate that to 'xdg-open'.
 
 \begin{code}
-  type AppT = ReaderT ServerState
+  type AppEff = Eff '[Reader Node.LocalNode, Reader Window, Reader (Pool Pipe)]
 
   data ServerState = SS {_ps :: ProcessState, _w :: Window}
 
@@ -67,18 +70,18 @@ Window is also a state in this application and therefore should also be in the r
 
 Model this after startGUI.
 \begin{code}
-  startApp :: BoltCfg -> (Window -> AppT UI ()) -> IO ()
+  startApp :: BoltCfg -> (Window -> AppEff (UI ())) -> IO ()
   startApp bcfg appui = do
     addr <- getAddr
     backend <- initializeBackend addr "8230" Node.initRemoteTable
     node <- newLocalNode backend
-    rpool <- createPool (connect bcfg) close 4 500 1
+    rpool <- createPool (DB.connect bcfg) DB.close 4 500 1
     let config = defaultConfig {jsStatic = Just ".",
                                 jsAddr = Just (BSC.pack addr),
                                 jsPort = Just 8200,
                                 jsLog = logProcess node}
         serverstate = SS (PS node rpool)
-    Node.runProcess node . liftIO $ startGUI config (\w -> runReaderT (appui w) (serverstate w))
+    Node.runProcess node . liftIO $ startGUI config (\w -> run (appui w))
 \end{code}
 
 We define our own logger for threepenny gui such that there cannot be race conditions for stderr.

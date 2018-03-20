@@ -1,25 +1,54 @@
 \begin{code}
-  module Process (
-    ProcessT,
-    PProcessT
-  )
-  where
+{-# language GADTs #-}
+{-# language FlexibleContexts #-}
+module Process (
+  Process,
+  spawn,
+  call,
+  send,
+  expect
+  ) where
 
-  import Control.Monad.Reader
-  import Control.Distributed.Process
+import Control.Monad.Freer hiding (send)
+import qualified Control.Monad.Freer as F (send)
+import qualified Control.Distributed.Process as DP
+import qualified Control.Distributed.Process.Node as DPN
+
+type PID = DP.ProcessId
+
+data ProcessCreate effs r where
+  Spawn :: Eff effs () -> ProcessCreate effs PID
+  Call :: Eff effs r -> ProcessCreate effs r
+
+data ProcessComm r where
+  Send :: PID -> a -> ProcessComm ()
+  Expect :: ProcessComm a
+  Say :: String -> ProcessComm ()
+
+spawn :: (Member Process effs, Member Process effs') => Eff effs' () -> Eff effs PID
+spawn = F.send . Spawn
+
+call :: (Member Process effs, Member Process effs') => Eff effs' r -> Eff effs r
+call = F.send . Call
+
+send :: (Member Process effs) => PID -> a -> Eff effs ()
+send pid = F.send . Send pid
+
+expect :: (Member Process effs) => Eff effs a
+expect = F.send Expect
+
+say :: (Member Process effs) => String -> Eff effs ()
+say = F.send . Say
 \end{code}
-TODO: This can probably be put somewhere under the distributed process hierarchy.
 
-We introduce our own process type which is augmented with the information it is allow to use.
-This such that we can use the types to show what kind of operations are allowed.
+runProcess hoeft misschien niet zo'n precies type the hebben.
 
-Preferably we blacklist rather than whitelist what is allowed but we want to convey more information in the types themselves and have helper functions which restrict the state that is carried and use phantom type to distinguise.
+Beter is waarschijnlijk iets zoals:
+runReader :: forall r effs a. r -> Eff (Reader r ': effs) a -> Eff effs a
 
 \begin{code}
-  -- | A type that wraps process in a ReaderT where 'a' is the information it carries.
-  type ProcessT a = ReaderT a Process
-
-  -- | Add a phantom type to ProcessT such that we can restrict the kind of ProcessT that is given to a function.
-  type PProcessT b a n = ProcessT a n
-
+  runProcess :: Eff '[ProcessCreate effs] ': effs () -> Eff effs ()
+  runProcess = intepret f
+    where f :: ProcessCreate effs r -> Eff effs ()
+          f (Spawn p) = forkProcess
 \end{code}

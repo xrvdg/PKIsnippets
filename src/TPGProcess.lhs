@@ -1,6 +1,7 @@
 TODO: This section is probably better named as Graphics.UI.Threepenny.Process
 \begin{code}
 {-# LANGUAGE MonoLocalBinds, DeriveDataTypeable, DeriveGeneric #-}
+{-# language DataKinds #-}
 \end{code}
 \begin{code}
   module TPGProcess(
@@ -15,46 +16,31 @@ TODO: This section is probably better named as Graphics.UI.Threepenny.Process
   import Graphics.UI.Threepenny as GUT
   import Control.Monad.Reader
   import Data.Binary
-  import Control.Distributed.Process.Node
   import Control.Distributed.Process.Serializable
-  import Control.Distributed.Process
   import Control.Monad (void)
   import Process
+  import Control.Monad.Freer
 \end{code}
 
-These typeclasses are used to restricted what can be executed.
-The HasWindow typeclass is for being able to construct liftUI instances and that we can split up the state of an app in parts that are and arenot UI.
-The HasLocalNode is used to inform the compiler that these datatypes have a localNode and therefore be used onEventProcess.
+Process servers are processes that run an computation when it receives thf LtU to new servers is complete.
 
-Can probably be combined into a single class, but still have the same methods.
-Will clean up the onEventProcess signamture.
+If you notice any issues with the site, please post in this thread (if you can), or email me at antonvs8 at (gmail domain).
 
-\begin{code}
-
-  class TPGProcessInfo a where
-    localNode :: a -> LocalNode
-    window :: a -> Window
-
-  instance (MonadUI m, MonadIO m, TPGProcessInfo w) => MonadUI (ReaderT w m) where
-    liftUI uia = do w <- asks window
-                    liftIO $ runUI w (liftUI uia)
-\end{code}
-
-Process servers are processes that run an computation when it receives the expected input.
+Original announcement appears below:e expected input.
 
 TODO: determine if this processTask is nicely without the 'Let it crash' philosophy or that it should be a slightly more fault tolerant.
 Might involve changing the handler, because the handler is the precious part. Losing the handler means losing the connection to corresponding TPG-event receiver.
-
+Here we want to let them both have the same effects
 \begin{code}
   -- | A process server that has a single task.
-  processTask :: Serializable a => (a -> Process b) -> Process ()
+  processTask :: (Member Process effs, Serializable a) => (a -> Eff effs b) -> Eff effs ()
   processTask f = do a <- expect
                      say $ "received: "
                      f a
                      processTask f
 
   -- | A process server with a single tasks that executes handler when the function is done.
-  handlerProcessTask :: Serializable a => GUT.Handler b -> (a -> Process b) -> Process ()
+  handlerProcessTask :: (Member Process effs, Serializable a) => GUT.Handler b -> (a -> Eff effs b) -> Eff effs ()
   handlerProcessTask h f = processTask (\a -> f a >>= liftIO . h)
 
 \end{code}
@@ -65,26 +51,23 @@ TODO: Probably can make a datatype which captures the TPGProcessInfo in its type
 TODO: This defininition for onEvent is not very nice yet. Come back to this after the GADT/Dependent types lectures.
 This at least gives a general structure to express the idea.
 A proper solution will probably extract the resource constraining of a process to the process module.
+
+TODO: probably need to create an onEvent that takes an eff as argument rather than IO.
+TODO: maybe this doesn't need an Eff effs -> No it does because otherwise we still need to give it the localnode to run.
 \begin{code}
   -- | In usage it acts the same as onEvent but rather than running an IO operation in GUI thread it launches a process server for this IO operation.
-  onEventProcess  :: (Serializable a, TPGProcessInfo ss) => Event a -> (ss -> c) -> (a -> ProcessNonUI c b) -> (b -> UI void) -> ReaderT ss UI ()
+  onEventProcess  :: (Serializable a, Member Process effs', Members '[Process, UI] effs) => Event a -> (a -> Eff effs b) -> (b -> UI void) -> Eff effs ()
   onEventProcess event extract rf gf = void $  do
          (callbackev, fire) <- liftIO newEvent
          cs <- asks extract
          nid <- asks localNode
-         pid <- liftIO $ forkProcess nid (handlerProcessTask fire (\a -> runReaderT (rf a) cs))
-         liftUI $ do
-                     onEvent event (liftIO . runProcess nid . send pid)
+         pid <- spawn (handlerProcessTask fire (\a -> runReaderT (rf a) cs))
+         sendM $ do
+                     onEvent event (send pid)
                      onEvent callbackev gf
 \end{code}
 
-\begin{code}
-  -- | To be used in combination with ProcessT to annotate that code is not allowed to use UI.
-  data NonUI
-
-  type ProcessNonUI a b = PProcessT NonUI a b
-\end{code}
-
+TODO: make  the types stronger such that
 TODO: introduce a class instance for onEventProcess that extracts the desired state from the r carried around in ReaderT. Then the current onEventProcess can have a extra function argument to make the type stricter.
 Might also require to split the Window/UI object.
 

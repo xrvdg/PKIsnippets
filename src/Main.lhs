@@ -28,7 +28,7 @@
   main :: IO ()
   main = startApp settings setup
 
-  setup :: Window -> AppT UI ()
+  setup :: Window -> AppEff UI ()
   setup w = do
     cv <- controlView
     liftIO . runUI w . void $ do

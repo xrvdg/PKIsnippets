@@ -31,12 +31,12 @@ Where in ADD the second is dependent on the first.
   delayedShow a = liftIO (threadDelay delay) >> return  (show a ++ show delay)
     where delay = 5000000
 
-  controlView :: AppT UI Element
+  controlView :: (Member UI effs) => Eff effs Element
   controlView = do
-                   regular <- liftUI $ ARF.mkAddRemove "regular"
-                   status <-  liftUI $ string "No status yet"
+                   regular <- sendM $ ARF.mkAddRemove "regular"
+                   status <-  sendM $ string "No status yet"
                    onEventProcess (ARF.ev regular) (const ()) delayedShow (\b -> element status # set text b)
-                   liftUI $ do
+                   sendM $ do
                                bCurrent <- stepper Nothing (ARF.getText ARF.isADD <$> ARF.ev regular)
                                parent <- ARF.mkAddRemove "parent"
                                child <- ARF.mkAddRemove "child"
