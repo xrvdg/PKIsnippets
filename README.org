@@ -1,8 +1,9 @@
-The idea behind this project is being able to build your own PKI based on a couple of primitives.
-We try to follow the structure of projects like XMonad. Have a good base configuration such that is well usable.
-And by means of writing your own main you can slowly and steady change the system to fit your liking.
+directory structure:
+\src 
+  Collection of snippets for a effects system that supports concurrency, graph drawing, ThreepennyGUI event handling.
 
-The base layer holds the logical representations and relation between facts.
+\ops
+  nix snippets to build a container containing neo4j and this project.
 
-To represent the base layer we have the view layer. 
-
+for completeness the sigma.js code is added as submodule.
+Drawing code currently assumes that sigma.js is build in de directory ./sigma.js
