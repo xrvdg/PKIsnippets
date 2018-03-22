@@ -14,13 +14,13 @@ main = undefined
 \end{code}
 
 \begin{code}
-newtype PEff r fr a = PEff (F.Eff r a) deriving (Functor, Applicative, Monad)
+newtype PEff r fr a = PEff (F.Eff (Proc r ': r) a) deriving (Functor, Applicative, Monad)
 \end{code}
 
 
 \begin{code}
-runPEff :: (F.LastMember Process r) => PEff ((Proc r) ': r) rf a -> PEff r rf a
-runPEff (PEff eff) = PEff (F.interpretM f eff)
+runPEff :: (F.LastMember Process r) => PEff r rf a -> F.Eff r a
+runPEff (PEff eff) = F.interpretM f eff
   where
    f :: (Proc r a -> Process a)
    f (Spawn r s) = (spawnLocal _)
@@ -46,7 +46,10 @@ data Proc r a where
 --  send (Spawn r eff)
 
 ask :: PEff r rf (PEff r rf a -> a)
-ask = send Ask
+ask = sendProc Ask
+
+sendProc :: Proc r a -> PEff r rf a
+sendProc eff = _
 
 send :: (F.Member eff effs) => eff a -> PEff effs rf a
 send = lift . F.send
@@ -55,15 +58,15 @@ send = lift . F.send
 
 \begin{code}
 lift :: F.Eff r a -> PEff r rf a
-lift = PEff
+lift = PEff . F.raise
 \end{code}
 
 \begin{code}
-raiseProc :: (F.LastMember Process r) => PEff ((Proc r) ': r) fr a -> PEff ( (Proc (e ': r)) ': e ': r) fr a
-raiseProc p = raise (raise (runPEff p))
+upgrade :: F.Eff (Proc r ': r) a -> PEff r rf a
+upgrade = PEff
 \end{code}
 
 \begin{code}
-raise :: PEff r fr a -> PEff (e ': r) fr a
-raise (PEff eff) = PEff (F.raise eff)
+raise :: (F.LastMember Process r) => PEff r fr a -> PEff (e ': r) fr a
+raise p = PEff (F.raise (F.raise (runPEff p)))
 \end{code}
