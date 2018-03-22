@@ -6,7 +6,9 @@
 {-# language FlexibleContexts #-}
 {-# language LambdaCase #-}
 import qualified Control.Monad.Freer as F
+import qualified Control.Monad.Freer.Internal as FI
 import qualified Control.Monad.Freer.Reader as FR
+import Data.OpenUnion ((:++:))
 import Control.Distributed.Process (ProcessId, liftIO, Process, spawnLocal)
 \end{code}
 \begin{code}
@@ -40,25 +42,19 @@ data Proc r a where
 \end{code}
 
 \begin{code}
---spawn :: (F.Members e r) => PEff e rf () -> PEff r rf ProcessId
---spawn eff = do
---  r <- ask
---  send (Spawn r eff)
-
 ask :: PEff r rf (PEff r rf a -> a)
-ask = sendProc Ask
+ask = send Ask
 
-sendProc :: Proc r a -> PEff r rf a
-sendProc eff = _
+send :: (F.Member eff ((Proc effs) ': effs)) => eff a -> PEff effs rf a
+send t = PEff (FI.E (FI.inj t) (FI.tsingleton FI.Val))
 
-send :: (F.Member eff effs) => eff a -> PEff effs rf a
-send = lift . F.send
+
 
 \end{code}
 
 \begin{code}
 lift :: F.Eff r a -> PEff r rf a
-lift = PEff . F.raise
+lift = upgrade . F.raise
 \end{code}
 
 \begin{code}
