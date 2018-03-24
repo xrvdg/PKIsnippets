@@ -12,7 +12,10 @@ To allow the definition of effects
 \begin{code}
 {-# language TypeFamilies, TypeFamilyDependencies #-}
 \end{code}
-
+Required for gets
+\begin{code}
+{-# language TypeApplications #-}
+\end{code}
 To allow runners
 \begin{code}
 \end{code}
@@ -90,9 +93,12 @@ test2 :: Eff '[FR.Reader Int] Int
 test2 = FR.ask
 
 test :: Eff '[FR.Reader Int, FS.State Int] Int
-test = do n <- FS.get
+test = do n <- FS.get @Int
           m <- FR.ask
-          return (m + n)
+          FS.put (n + m)
+          FS.put (n + m + 1)
+          FS.put (n + m + 2)
+          FS.get @Int
 
 testRun :: Int
 testRun = run (FS.evalState 3 (FR.runReader 5 test))
