@@ -43,6 +43,7 @@ import Unsafe.Coerce
 import Data.Coerce
 import Debug.Trace
 import Control.Monad.IO.Class
+import GHC.Types (type (~~))
 \end{code}
 
 For the IO tests
@@ -252,15 +253,11 @@ TODO: refactor de unsafeCoerce handler
 Mooier zou wellicht zijn SubList s r i.p.v. onderstaande, op deze manier zijn er wel minder unsafeCoerce nodig
 Anders zou de Base en Keep situatie nog een extra unsafeCoerce nodig hebben.
 \begin{code}
-extractHandlers' ::Coercible (SubListRep s r) (SubListRep (HandlerList s a) (HandlerList r a)) => SubList (HandlerList s a) (HandlerList r a) -> HVect (HandlerList r a) -> HVect (HandlerList s a)
-extractHandlers' Base r = HNil
-extractHandlers' (Keep sl) (r :&: rs) = r :&: unsafeCoerce (extractHandlers' (unsafeCoerce sl) (unsafeCoerce rs))
-extractHandlers' (Drop sl) (r :&: rs) = unsafeCoerce (extractHandlers' (unsafeCoerce sl) (unsafeCoerce rs))
+extractHVect :: SubList xs ys -> HVect ys -> HVect xs
+extractHVect Base r = HNil
+extractHVect (Keep sl) (r :&: rs) = r :&: (extractHVect sl rs)
+extractHVect (Drop sl) (r :&: rs) = extractHVect sl rs
 
-extractHandlers :: (SubListRep s r) => HVect (HandlerList r a) -> HVect (HandlerList s a)
-extractHandlers Base = extractHandlers' _
-extractHandlers (Keep sl) r = _
-extractHandlers (Drop sl) r = _
 \end{code}
 
 Voeg constraint equality toe. Op die manier moet het volgens mij lukken om de sublist eis die er nu is voor extractHandler' om te zetten naar (SubList s r)
