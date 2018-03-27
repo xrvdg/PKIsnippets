@@ -116,7 +116,7 @@ type family LastVect xs :: [* -> *] where
    LastVect '[x] = '[x]
    LastVect (t ': ts) = LastVect ts
 
-runListM :: forall effs a m. HVect (HandlerList (InitVect effs) a) -> Eff effs a -> Eff (LastVect effs) a
+runListM :: forall effs a m. HVect (HandlerListM effs a) -> Eff effs a -> Eff (LastVect effs) a
 runListM HNil fect = unsafeCoerce fect
 runListM (r :&: rs) fect = unsafeCoerce (runListM (unsafeCoerce rs) (r' fect'))
   where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
@@ -181,7 +181,11 @@ This is used to be able to work with SubLists.
 type family HandlerList effs a = result | result -> effs a where
   HandlerList '[eff] a = '[(Handler eff '[] a)]
   HandlerList (eff ': effs) a = (Handler eff effs a) ': HandlerList effs a
+\end{code}
 
+We instroduce an extra list for handlers such that we get one entry less, but that this last
+entry is still recorded in the effects lists. That is why Handerlist in combination with InitVect didn't work
+\begin{code}
 type family HandlerListM effs a = result | result -> effs a where
   HandlerListM '[eff, m] a = '[(Handler eff '[m] a)]
   HandlerListM (eff ': effs) a = (Handler eff effs a) ': HandlerListM effs a
@@ -224,7 +228,7 @@ testIO = do putStrLn' "Hello, World"
 testIORun = runConsole testIO
 
 testIORun2 :: Eff '[IO] ()
-testIORun2 = runListM (_ :&: HNil) testIO
+testIORun2 = runListM (runConsole' :&: HNil) testIO
 \end{code}
 
 Having a type family flatten might drop the need for having to split interpreters. Is het echter voldoende om te weten
