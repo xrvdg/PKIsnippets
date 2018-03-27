@@ -65,7 +65,7 @@ runPure HNil = run
 
 type Handler b effs a = Eff (b ': effs) a -> Eff effs a
 
-data HandlerM b effs a n = (LastMember n effs, Monad n) => HandlerM {runHandlerM :: Eff (b ': effs) a -> Eff effs a}
+-- data HandlerM b effs a n = (LastMember n effs, Monad n) => HandlerM {runHandlerM :: Eff (b ': effs) a -> Eff effs a}
 
 
 runHead :: HVect ((Handler b effs a) ': hf) -> Eff (b ': effs) a -> Eff effs a
@@ -90,16 +90,34 @@ runList (r :&: rs) fect =  let r' = (unsafeCoerce r) :: (Handler eff (eff' ': ef
 runListAll :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> a
 runListAll a b = run (runList a b)
 
+\end{code}
+
+\begin{code}
 runList :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> Eff '[] a
 runList HNil fect = unsafeCoerce fect
-runList (r :&: rs) fect = helper Proxy Proxy
-  where helper :: forall eff' effs' a. Proxy eff' -> Proxy effs' -> Eff '[] a
-        helper a b =
-          let fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
-              r' = (unsafeCoerce r) :: Handler eff' effs' b
-          in runList (unsafeCoerce rs) (r' fect')
+runList (r :&: rs) fect = runList (unsafeCoerce rs) (r' fect')
+  where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
+        r' = (unsafeCoerce r) :: Handler eff' effs' a
+\end{code}
+This runListSafe doesn't work since we cant signal to the compiler that hwne HNil that its type is HVect  '[]
+
+runListSafe :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> Eff '[] a
+runListSafe vec fect = case vec of
+                         g@HNil -> _
+                         (r :&: rs) -> _
 
 
+Een run partial zoals hieronder werkt niet doordat we geen injective type families hebben die ook met LHS kunnen werken
+injectivity of type C zoals omschreven op GHC trac.
+runListPartial :: forall effs effs2 a . HVect (HandlerList effs a)  -> Eff (Append effs effs2) a -> Eff effs2 a
+runListPartial = _
+
+Mogelijk alternative zou kunnen zijn gebruik maken van "split" Split effs eff2 ceff
+Waar effs ++ effs2 = ceff
+
+runListPartial :: Split effs effs ceff -> HVect (HandlerList effs a)  -> Eff (Append effs effs2) a -> Eff effs2 a
+
+\begin{code}
 test1 :: Eff '[FS.State Int] Int
 test1 =  FS.get
 
@@ -136,11 +154,13 @@ testRun3 = run (runList ((FR.runReader 5) :&: (FS.evalState 3) :&: HNil) test)
 decompHList :: HVect (HandlerList (eff ': effs) a) -> (Handler eff effs a, HVect (HandlerList effs a))
 decompHList eff = (findFirst eff, HV.tail eff)
 \end{code}
+
 \begin{code}
 type family HandlerList effs a where
   HandlerList (eff ': effs) a = (Handler eff effs a) ': HandlerList effs a
   HandlerList '[] a =  '[]
 
+\end{code}
 type family HandlerListM effs a n where
   HandlerListM '[n] a n = '[n]
   HandlerListM (eff ': effs) a n = (HandlerM eff effs a n) ': HandlerListM effs a n
@@ -153,7 +173,6 @@ runListM (r :&: rs) fect = helper Proxy Proxy Proxy
           let fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
               r' = (unsafeCoerce r) :: HandlerM eff' effs' b n
           in runListM (unsafeCoerce rs) (runHandlerM r' fect')
-\end{code}
 
 Add a check that can test wheter HandlerList effs a =>
 
@@ -197,5 +216,5 @@ testIO = do putStrLn' "Hello, World"
 
 testIORun = runConsole testIO
 
-testIORun2 = runListM (runConsole' :&: HNil) testIO
+--testIORun2 = runListM (runConsole' :&: HNil) testIO
 \end{code}
