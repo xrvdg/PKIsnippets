@@ -23,6 +23,10 @@ For the IO test
 {-# language FlexibleContexts #-}
 \end{code}
 
+For SubListRep
+\begin{code}
+{-# language MultiParamTypeClasses, FlexibleInstances #-}
+\end{code}
 \begin{code}
 module P (testRun) where
 import Control.Monad.Freer
@@ -67,15 +71,6 @@ type Handler b effs a = Eff (b ': effs) a -> Eff effs a
 
 -- data HandlerM b effs a n = (LastMember n effs, Monad n) => HandlerM {runHandlerM :: Eff (b ': effs) a -> Eff effs a}
 
-
-runHead :: HVect ((Handler b effs a) ': hf) -> Eff (b ': effs) a -> Eff effs a
-runHead rl eff = r eff
-  where r = findFirst rl
-
-runHeadList :: HVect (HandlerList (b ': effs) a) -> Eff (b ': effs) a -> Eff effs a
-runHeadList rl eff = r eff
-  where r = findFirst rl
-
 \end{code}
 runList :: forall eff effs a . HVect (HandlerList (eff ': effs) a) -> Eff (eff ': effs) a -> Eff '[] a
 runList (r :&: HNil) fect = let r' = (unsafeCoerce r) :: (Handler eff '[] a)
@@ -90,12 +85,35 @@ runList (r :&: rs) fect =  let r' = (unsafeCoerce r) :: (Handler eff (eff' ': ef
 runListAll :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> a
 runListAll a b = run (runList a b)
 
-\end{code}
-
-\begin{code}
 runList :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> Eff '[] a
 runList HNil fect = unsafeCoerce fect
 runList (r :&: rs) fect = runList (unsafeCoerce rs) (r' fect')
+  where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
+        r' = (unsafeCoerce r) :: Handler eff' effs' a
+\end{code}
+
+Since we do not only want to run pure computations but also with monads
+we need to run till the last one.
+
+A different possibiltiy might be to encode the list length and based on that create something
+that would however require natural numbers arithmetic
+
+Might be possible to reduce the amount tof code by letting runList call runListM
+
+lesson: don't try to combine -> substract
+\begin{code}
+
+type family InitVect xs :: [* -> *] where
+   InitVect '[x] = '[]
+   InitVect (t ': ts) = t ': (InitVect ts)
+
+type family LastVect xs :: [* -> *] where
+   LastVect '[x] = '[x]
+   LastVect (t ': ts) = LastVect ts
+
+runListM :: forall effs a m. HVect (HandlerList (InitVect effs) a) -> Eff effs a -> Eff (LastVect effs) a
+runListM HNil fect = unsafeCoerce fect
+runListM (r :&: rs) fect = unsafeCoerce (runListM (unsafeCoerce rs) (r' fect'))
   where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
         r' = (unsafeCoerce r) :: Handler eff' effs' a
 \end{code}
@@ -150,34 +168,13 @@ test2Run3 = run (runList ((FR.runReader 5) :&: HNil) test2)
 
 testRun3 :: Int
 testRun3 = run (runList ((FR.runReader 5) :&: (FS.evalState 3) :&: HNil) test)
-
-decompHList :: HVect (HandlerList (eff ': effs) a) -> (Handler eff effs a, HVect (HandlerList effs a))
-decompHList eff = (findFirst eff, HV.tail eff)
 \end{code}
 
 \begin{code}
-type family HandlerList effs a where
+type family HandlerList effs a = result | result -> effs a where
+  HandlerList '[eff] a = '[(Handler eff '[] a)]
   HandlerList (eff ': effs) a = (Handler eff effs a) ': HandlerList effs a
-  HandlerList '[] a =  '[]
 
-\end{code}
-type family HandlerListM effs a n where
-  HandlerListM '[n] a n = '[n]
-  HandlerListM (eff ': effs) a n = (HandlerM eff effs a n) ': HandlerListM effs a n
-
-runListM :: forall effs a n. (LastMember n effs, Monad n) => HVect (HandlerListM effs a n) -> Eff effs a -> Eff '[n] a
-runListM HNil fect = unsafeCoerce fect
-runListM (r :&: rs) fect = helper Proxy Proxy Proxy
-  where helper :: forall eff' effs' a n. (Monad n, LastMember n effs') => Proxy n -> Proxy eff' -> Proxy effs' -> Eff '[n] a
-        helper a b c =
-          let fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
-              r' = (unsafeCoerce r) :: HandlerM eff' effs' b n
-          in runListM (unsafeCoerce rs) (runHandlerM r' fect')
-
-Add a check that can test wheter HandlerList effs a =>
-
- Add decomposition operator which splits it into 
-\begin{code}
 \end{code}
 
 HVectElim looks interesting just do not know how to apply it
@@ -217,4 +214,32 @@ testIO = do putStrLn' "Hello, World"
 testIORun = runConsole testIO
 
 --testIORun2 = runListM (runConsole' :&: HNil) testIO
+\end{code}
+
+Having a type family flatten might drop the need for having to split interpreters. Is het echter voldoende om te weten
+dat wanneer alles heeft gedraait alles weg is? Lijkt me wel voldoende, maar moet wel even oppassen.
+HandlerList type family hoeft niet worden aangepast. Er moet alleen een flatten worden uitgevoerd of de eff lijst.
+
+\begin{code}
+data SubList (xs :: [* -> *]) (ys :: [* -> *]) where
+  Base :: SubList '[] '[]
+  Keep :: SubList xs ys -> SubList (x ': xs) (x ': ys)
+  Drop :: SubList xs ys -> SubList xs (y ': ys)
+
+class SubListRep xs ys where
+  getSubList :: SubList xs ys
+
+instance SubListRep '[] '[] where
+  getSubList = Base
+
+instance SubListRep xs ys => SubListRep (x ': xs) (x ': ys) where
+  getSubList = Keep getSubList
+
+instance SubListRep xs ys => SubListRep xs (y ': ys) where
+  getSubList = Drop getSubList
+\end{code}
+
+\begin{code}
+extractHandlers :: SubList s r -> HVect (HandlerList r a) -> HVect (HandlerList s a)
+extractHandlers = _
 \end{code}
