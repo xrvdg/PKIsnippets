@@ -87,14 +87,15 @@ Misschien iets van een length check voor HandlerList en effs toevoegen? Op die m
 te reducren voor de compiler
 \begin{code}
 
-runListAll :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> a
-runListAll a b = run (runList a b)
+runHandler :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> a
+runHandler hl eff = run (runList hl eff)
 
 runList :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> Eff '[] a
 runList HNil fect = unsafeCoerce fect
 runList (r :&: rs) fect = runList (unsafeCoerce rs) (r' fect')
   where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
         r' = (unsafeCoerce r) :: Handler eff' effs' a
+
 \end{code}
 
 Since we do not only want to run pure computations but also with monads
@@ -116,7 +117,10 @@ type family LastVect xs :: [* -> *] where
    LastVect '[x] = '[x]
    LastVect (t ': ts) = LastVect ts
 
-runListM :: forall effs a m. HVect (HandlerListM effs a) -> Eff effs a -> Eff (LastVect effs) a
+runHandlerM :: (LastVect effs ~ '[m], Monad m) => HVect (HandlerListM effs a) -> Eff effs a -> m a
+runHandlerM hl eff = runM (runListM hl eff)
+
+runListM :: HVect (HandlerListM effs a) -> Eff effs a -> Eff (LastVect effs) a
 runListM HNil fect = unsafeCoerce fect
 runListM (r :&: rs) fect = unsafeCoerce (runListM (unsafeCoerce rs) (r' fect'))
   where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
@@ -225,6 +229,7 @@ testIO :: Eff '[Console, IO] ()
 testIO = do putStrLn' "Hello, World"
             exitSuccess'
 
+testIORun :: IO ()
 testIORun = runConsole testIO
 
 testIORun2 :: Eff '[IO] ()
