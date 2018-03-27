@@ -26,7 +26,9 @@ For the IO test
 For SubListRep
 \begin{code}
 {-# language MultiParamTypeClasses, FlexibleInstances #-}
+{-# language PolyKinds #-}
 \end{code}
+
 \begin{code}
 module P (testRun) where
 import Control.Monad.Freer
@@ -38,6 +40,7 @@ import Data.OpenUnion ((:++:))
 import Control.Distributed.Process (ProcessId, liftIO, Process, spawnLocal)
 import Data.Proxy
 import Unsafe.Coerce
+import Data.Coerce
 import Debug.Trace
 import Control.Monad.IO.Class
 \end{code}
@@ -80,6 +83,9 @@ runList (r :&: rs) fect =  let r' = (unsafeCoerce r) :: (Handler eff (eff' ': ef
                                fect' = (unsafeCoerce rs) :: Eff (eff ': eff' ': effs') a
                                rs' = (unsafeCoerce rs) :: HVect (HandlerList (eff' ': effs') a)
                            in runList rs' (r' fect')
+
+Misschien iets van een length check voor HandlerList en effs toevoegen? Op die manier zijn de twee wellicht beter
+te reducren voor de compiler
 \begin{code}
 
 runListAll :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> a
@@ -170,6 +176,8 @@ testRun3 :: Int
 testRun3 = run (runList ((FR.runReader 5) :&: (FS.evalState 3) :&: HNil) test)
 \end{code}
 
+Make handlerlist be non-empty such that it can be injective.
+This is used to be able to work with SubLists.
 \begin{code}
 type family HandlerList effs a = result | result -> effs a where
   HandlerList '[eff] a = '[(Handler eff '[] a)]
@@ -221,7 +229,7 @@ dat wanneer alles heeft gedraait alles weg is? Lijkt me wel voldoende, maar moet
 HandlerList type family hoeft niet worden aangepast. Er moet alleen een flatten worden uitgevoerd of de eff lijst.
 
 \begin{code}
-data SubList (xs :: [* -> *]) (ys :: [* -> *]) where
+data SubList (xs :: k) (ys :: k) where
   Base :: SubList '[] '[]
   Keep :: SubList xs ys -> SubList (x ': xs) (x ': ys)
   Drop :: SubList xs ys -> SubList xs (y ': ys)
@@ -239,7 +247,28 @@ instance SubListRep xs ys => SubListRep xs (y ': ys) where
   getSubList = Drop getSubList
 \end{code}
 
+TODO: refactor de unsafeCoerce handler
+
+Mooier zou wellicht zijn SubList s r i.p.v. onderstaande, op deze manier zijn er wel minder unsafeCoerce nodig
+Anders zou de Base en Keep situatie nog een extra unsafeCoerce nodig hebben.
 \begin{code}
-extractHandlers :: SubList s r -> HVect (HandlerList r a) -> HVect (HandlerList s a)
-extractHandlers = _
+extractHandlers' ::Coercible (SubListRep s r) (SubListRep (HandlerList s a) (HandlerList r a)) => SubList (HandlerList s a) (HandlerList r a) -> HVect (HandlerList r a) -> HVect (HandlerList s a)
+extractHandlers' Base r = HNil
+extractHandlers' (Keep sl) (r :&: rs) = r :&: unsafeCoerce (extractHandlers' (unsafeCoerce sl) (unsafeCoerce rs))
+extractHandlers' (Drop sl) (r :&: rs) = unsafeCoerce (extractHandlers' (unsafeCoerce sl) (unsafeCoerce rs))
+
+extractHandlers :: (SubListRep s r) => HVect (HandlerList r a) -> HVect (HandlerList s a)
+extractHandlers Base = extractHandlers' _
+extractHandlers (Keep sl) r = _
+extractHandlers (Drop sl) r = _
 \end{code}
+
+Voeg constraint equality toe. Op die manier moet het volgens mij lukken om de sublist eis die er nu is voor extractHandler' om te zetten naar (SubList s r)
+
+De definitie van SubList gegeven zoals hierboven is niet informatierijk genoeg dat  de compiler kan achterhalen
+wat de 'eff' en 'effs' moet zijn voor een (Handler eff effs). Onderstaande sublist gebruiken vereist weer typeintype wat ik niet wil doen.
+
+data SubListHL (xs :: HandlerList effs a) (ys :: HandlerList effs2 a) where
+  Base :: SubListHL '[] '[]
+  Keep :: SubListHL xs ys -> SubListHL ((Handler eff effs a) ': HandlerList effs)  ((Handler eff effs2 a) ': HandlerList effs2 a)
+  Drop :: SubListHL xs ys -> SubListHL (HandlerList effs a)  ((Handler eff effs2 a) ': HandlerList effs2 a)
