@@ -26,7 +26,7 @@ For the IO test
 For SubListRep
 \begin{code}
 {-# language MultiParamTypeClasses, FlexibleInstances #-}
-{-# language PolyKinds #-}
+{-# language ConstraintKinds #-}
 \end{code}
 
 \begin{code}
@@ -40,10 +40,8 @@ import Data.OpenUnion ((:++:))
 import Control.Distributed.Process (ProcessId, liftIO, Process, spawnLocal)
 import Data.Proxy
 import Unsafe.Coerce
-import Data.Coerce
 import Debug.Trace
 import Control.Monad.IO.Class
-import GHC.Types (type (~~))
 \end{code}
 
 For the IO tests
@@ -184,6 +182,9 @@ type family HandlerList effs a = result | result -> effs a where
   HandlerList '[eff] a = '[(Handler eff '[] a)]
   HandlerList (eff ': effs) a = (Handler eff effs a) ': HandlerList effs a
 
+type family HandlerListM effs a = result | result -> effs a where
+  HandlerListM '[eff, m] a = '[(Handler eff '[m] a)]
+  HandlerListM (eff ': effs) a = (Handler eff effs a) ': HandlerListM effs a
 \end{code}
 
 HVectElim looks interesting just do not know how to apply it
@@ -222,7 +223,8 @@ testIO = do putStrLn' "Hello, World"
 
 testIORun = runConsole testIO
 
---testIORun2 = runListM (runConsole' :&: HNil) testIO
+testIORun2 :: Eff '[IO] ()
+testIORun2 = runListM (_ :&: HNil) testIO
 \end{code}
 
 Having a type family flatten might drop the need for having to split interpreters. Is het echter voldoende om te weten
@@ -230,7 +232,7 @@ dat wanneer alles heeft gedraait alles weg is? Lijkt me wel voldoende, maar moet
 HandlerList type family hoeft niet worden aangepast. Er moet alleen een flatten worden uitgevoerd of de eff lijst.
 
 \begin{code}
-data SubList (xs :: k) (ys :: k) where
+data SubList xs ys where
   Base :: SubList '[] '[]
   Keep :: SubList xs ys -> SubList (x ': xs) (x ': ys)
   Drop :: SubList xs ys -> SubList xs (y ': ys)
@@ -248,17 +250,21 @@ instance SubListRep xs ys => SubListRep xs (y ': ys) where
   getSubList = Drop getSubList
 \end{code}
 
+\begin{code}
+extractHVect' :: SubList xs ys -> HVect ys -> HVect xs
+extractHVect' Base r = HNil
+extractHVect' (Keep sl) (r :&: rs) = r :&: (extractHVect' sl rs)
+extractHVect' (Drop sl) (r :&: rs) = extractHVect' sl rs
+
+extractHVect :: (SubListRep xs ys) => HVect ys -> HVect xs
+extractHVect = extractHVect' (getSubList)
+\end{code}
+
+Gaat alleemaal niet niet meer doordat we extractHVect hebben gemaakt i.p.v. extractHandler
 TODO: refactor de unsafeCoerce handler
 
 Mooier zou wellicht zijn SubList s r i.p.v. onderstaande, op deze manier zijn er wel minder unsafeCoerce nodig
 Anders zou de Base en Keep situatie nog een extra unsafeCoerce nodig hebben.
-\begin{code}
-extractHVect :: SubList xs ys -> HVect ys -> HVect xs
-extractHVect Base r = HNil
-extractHVect (Keep sl) (r :&: rs) = r :&: (extractHVect sl rs)
-extractHVect (Drop sl) (r :&: rs) = extractHVect sl rs
-
-\end{code}
 
 Voeg constraint equality toe. Op die manier moet het volgens mij lukken om de sublist eis die er nu is voor extractHandler' om te zetten naar (SubList s r)
 
@@ -269,3 +275,18 @@ data SubListHL (xs :: HandlerList effs a) (ys :: HandlerList effs2 a) where
   Base :: SubListHL '[] '[]
   Keep :: SubListHL xs ys -> SubListHL ((Handler eff effs a) ': HandlerList effs)  ((Handler eff effs2 a) ': HandlerList effs2 a)
   Drop :: SubListHL xs ys -> SubListHL (HandlerList effs a)  ((Handler eff effs2 a) ': HandlerList effs2 a)
+
+Can't drop the a unless we find a way to drop it in Handerlist a
+\begin{code}
+type SubListL s r a = (SubListRep (HandlerList s a) (HandlerList r a))
+extractHandler :: SubListL s r a => HVect (HandlerList r a) -> HVect (HandlerList s a)
+extractHandler = extractHVect
+\end{code}
+
+Lesson: keep your steps as simple as possible. That way you might be able to use types without coercing
+Lesson: You don't have to coerce if a type synonym suffices.
+Lesson: Also allowed me to drop the polykinds extention
+
+\begin{code}
+
+\end{code}
