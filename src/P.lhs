@@ -16,8 +16,11 @@ Required for gets
 \begin{code}
 {-# language TypeApplications #-}
 \end{code}
-To allow runners
+
+For the IO test
 \begin{code}
+{-# language LambdaCase #-}
+{-# language FlexibleContexts #-}
 \end{code}
 
 \begin{code}
@@ -32,6 +35,12 @@ import Control.Distributed.Process (ProcessId, liftIO, Process, spawnLocal)
 import Data.Proxy
 import Unsafe.Coerce
 import Debug.Trace
+import Control.Monad.IO.Class
+\end{code}
+
+For the IO tests
+\begin{code}
+import System.Exit hiding (ExitCode(ExitSuccess))
 \end{code}
 
 \begin{code}
@@ -56,6 +65,8 @@ runPure HNil = run
 
 type Handler b effs a = Eff (b ': effs) a -> Eff effs a
 
+data HandlerM b effs a n = (LastMember n effs, Monad n) => HandlerM {runHandlerM :: Eff (b ': effs) a -> Eff effs a}
+
 
 runHead :: HVect ((Handler b effs a) ': hf) -> Eff (b ': effs) a -> Eff effs a
 runHead rl eff = r eff
@@ -75,6 +86,9 @@ runList (r :&: rs) fect =  let r' = (unsafeCoerce r) :: (Handler eff (eff' ': ef
                                rs' = (unsafeCoerce rs) :: HVect (HandlerList (eff' ': effs') a)
                            in runList rs' (r' fect')
 \begin{code}
+
+runListAll :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> a
+runListAll a b = run (runList a b)
 
 runList :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> Eff '[] a
 runList HNil fect = unsafeCoerce fect
@@ -121,10 +135,24 @@ testRun3 = run (runList ((FR.runReader 5) :&: (FS.evalState 3) :&: HNil) test)
 
 decompHList :: HVect (HandlerList (eff ': effs) a) -> (Handler eff effs a, HVect (HandlerList effs a))
 decompHList eff = (findFirst eff, HV.tail eff)
-
+\end{code}
+\begin{code}
 type family HandlerList effs a where
   HandlerList (eff ': effs) a = (Handler eff effs a) ': HandlerList effs a
   HandlerList '[] a =  '[]
+
+type family HandlerListM effs a n where
+  HandlerListM '[n] a n = '[n]
+  HandlerListM (eff ': effs) a n = (HandlerM eff effs a n) ': HandlerListM effs a n
+
+runListM :: forall effs a n. (LastMember n effs, Monad n) => HVect (HandlerListM effs a n) -> Eff effs a -> Eff '[n] a
+runListM HNil fect = unsafeCoerce fect
+runListM (r :&: rs) fect = helper Proxy Proxy Proxy
+  where helper :: forall eff' effs' a n. (Monad n, LastMember n effs') => Proxy n -> Proxy eff' -> Proxy effs' -> Eff '[n] a
+        helper a b c =
+          let fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
+              r' = (unsafeCoerce r) :: HandlerM eff' effs' b n
+          in runListM (unsafeCoerce rs) (runHandlerM r' fect')
 \end{code}
 
 Add a check that can test wheter HandlerList effs a =>
@@ -136,3 +164,38 @@ Add a check that can test wheter HandlerList effs a =>
 HVectElim looks interesting just do not know how to apply it
 
 Toch een data family nodig?
+
+\begin{code}
+data Console r where
+  PutStrLn    :: String -> Console ()
+  GetLine     :: Console String
+  ExitSuccess :: Console ()
+
+putStrLn' :: Member Console effs => String -> Eff effs ()
+putStrLn' = send . PutStrLn
+
+getLine' :: Member Console effs => Eff effs String
+getLine' = send GetLine
+
+exitSuccess' :: Member Console effs => Eff effs ()
+exitSuccess' = send ExitSuccess
+
+runConsole :: Eff '[Console, IO] a -> IO a
+runConsole = runM . runConsole'
+
+runConsole' :: (MonadIO m, LastMember m effs) => Eff (Console ': effs) a -> Eff effs a
+runConsole' = interpretM (\case
+  PutStrLn msg -> liftIO $ putStrLn msg
+  GetLine -> liftIO $ getLine
+  ExitSuccess -> liftIO $ exitSuccess)
+\end{code}
+
+\begin{code}
+testIO :: Eff '[Console, IO] ()
+testIO = do putStrLn' "Hello, World"
+            exitSuccess'
+
+testIORun = runConsole testIO
+
+testIORun2 = runListM (runConsole' :&: HNil) testIO
+\end{code}
