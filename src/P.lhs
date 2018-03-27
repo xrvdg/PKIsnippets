@@ -87,10 +87,10 @@ Misschien iets van een length check voor HandlerList en effs toevoegen? Op die m
 te reducren voor de compiler
 \begin{code}
 
-runHandler :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> a
+runHandler :: HVect (HandlerList effs a) -> Eff effs a -> a
 runHandler hl eff = run (runList hl eff)
 
-runList :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> Eff '[] a
+runList :: HVect (HandlerList effs a) -> Eff effs a -> Eff '[] a
 runList HNil fect = unsafeCoerce fect
 runList (r :&: rs) fect = runList (unsafeCoerce rs) (r' fect')
   where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
