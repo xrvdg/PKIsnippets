@@ -30,6 +30,13 @@ For SubListRep
 \end{code}
 
 \begin{code}
+{-# language PolyKinds #-}
+\end{code}
+\begin{code}
+{-# language ImplicitParams #-}
+\end{code}
+
+\begin{code}
 module P (testRun) where
 import Control.Monad.Freer
 import qualified Control.Monad.Freer.Internal as FI
@@ -239,11 +246,15 @@ Having a type family flatten might drop the need for having to split interpreter
 dat wanneer alles heeft gedraait alles weg is? Lijkt me wel voldoende, maar moet wel even oppassen.
 HandlerList type family hoeft niet worden aangepast. Er moet alleen een flatten worden uitgevoerd of de eff lijst.
 
+Encode the encoding also in the sublistrep?
+Try somethign like SNatRep
+
 \begin{code}
-data SubList xs ys where
+data SubList (xs :: k) (ys :: k) where
   Base :: SubList '[] '[]
   Keep :: SubList xs ys -> SubList (x ': xs) (x ': ys)
   Drop :: SubList xs ys -> SubList xs (y ': ys)
+
 
 class SubListRep xs ys where
   getSubList :: SubList xs ys
@@ -251,10 +262,10 @@ class SubListRep xs ys where
 instance SubListRep '[] '[] where
   getSubList = Base
 
-instance SubListRep xs ys => SubListRep (x ': xs) (x ': ys) where
+instance {-# OVERLAPPING #-} SubListRep xs ys =>  SubListRep  (x ': xs) (x ': ys) where
   getSubList = Keep getSubList
 
-instance SubListRep xs ys => SubListRep xs (y ': ys) where
+instance {-# OVERLAPPABLE #-} SubListRep xs ys =>  SubListRep xs (y ': ys) where
   getSubList = Drop getSubList
 \end{code}
 
@@ -305,11 +316,11 @@ type PID = DP.ProcessId
 
 En het bevat de argument waar je mee wilt werken. Het enige dat het nog mist is de effect
 
+TODO add lift IO
 \begin{code}
 data Proc (r :: [* -> *]) a where
   Spawn ::  (LastVect r' ~ '[DP.Process]) => HVect (HandlerListM r') -> Eff r' () -> Proc r PID
   Call ::   (LastVect r' ~ '[DP.Process]) => HVect (HandlerListM r') -> Eff r' a -> Proc r a
-  Ask :: Proc r (HVect (HandlerListM r))
   Send  :: DS.Serializable a => PID -> a ->  Proc r ()
   Expect :: DS.Serializable a => Proc r a
 \end{code}
@@ -319,10 +330,10 @@ Since we now have subset proof those are probably cheaper to pass. But lets firs
 Probably it is always going to need a proc instance.
 The thing is that we can give it an identity function or some lifter such that it can't do much
 
+Probably better with reintepret? Than we can move Proc r as the last handler. Might make stuff easier.
 \begin{code}
 runProc :: (LastMember DP.Process effs) => HVect (HandlerListM r) -> Eff (Proc r ': effs) a -> Eff effs a
 runProc hl effs = interpretM (\case
-                                Ask -> return hl
                                 Spawn sl eff -> DP.spawnLocal (runHandlerM sl eff)
                                 Call sl eff -> DP.callLocal (runHandlerM sl eff)
                                 Send pid id -> DP.send pid id
@@ -336,3 +347,66 @@ Looks like the sublist proof could still just work rather than passing Handerlis
 Do something with rebindable do to keep the syntax minimalistic.
 
 Subtype, zal ook weer iets van sublist worden.
+
+Tests for the cases we want to support with proc
+
+Maybe we can drop the proxy with something else, or wrap it in some kind of gadt
+
+Adding a flatten for s will probably suffice
+\begin{code}
+
+call :: (SubListRep s r, LastMember (Proc r) effs) => Eff s a -> Eff effs a
+call eff = undefined
+\end{code}
+
+\begin{code}
+hh :: Eff '[FR.Reader Int] Int
+hh = FR.ask
+
+gh :: Eff '[FR.Reader String] String
+gh = FR.ask
+
+f :: Eff [FR.Reader String, FR.Reader Int, DP.Process] ()
+f = do s <- FR.ask @String
+       i <- FR.ask @Int
+       sendM $ liftIO $ putStrLn (s ++ show i)
+\end{code}
+Using implicitparameters does make it easier to change. We should however add defaultsignatures such that the first is
+choosen by default
+
+De volgende instanties hebben last van overlapping instances
+Of stap over dat Proc de laatste moet zijn in de chain.
+
+Iemand kan dan meerdere procs hebben, maar daar zul je niet echt heel veel last van hebben.
+
+Misschien is type application ook wel te gebruiken?
+Je kunt alleen maar substractive synthesis niet additive synthesis.
+Dus als je iets echt wilt moet het of vooraan, of achteraan staan.
+als nog kun je met commando's wel zeggen dat proc niet perse achteraan hoeft te staan?
+\begin{code}
+g :: Eff '[FR.Reader Int, Proc '[FR.Reader String]] ()
+g = do s <- call gh
+       i <- FR.ask @Int
+       liftIO $ putStrLn (s ++ show i)
+
+h :: Eff '[FR.Reader String, Proc '[FR.Reader Int]] ()
+h = do i <- call hh
+       s <- FR.ask @String
+       liftIO $ putStrLn (s ++ show i)
+
+\end{code}
+
+i's type should still be a valid instance it just isn't that useful.
+The code shouldn't work
+
+i :: Eff [Proc '[FR.Reader String], Proc '[FR.Reader Int]] ()
+i = do i <- call hh
+       s <- call gh
+       sendM $ liftIO $ putStrLn (s ++ show i)
+
+\begin{code}
+j :: Eff '[Proc '[FR.Reader String, FR.Reader Int]] ()
+j = do i <- call hh
+       s <- call gh
+       liftIO $ putStrLn (s ++ show i)
+\end{code}
