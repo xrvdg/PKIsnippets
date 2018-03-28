@@ -35,6 +35,9 @@ For SubListRep
 \begin{code}
 {-# language ImplicitParams #-}
 \end{code}
+\begin{code}
+{-# language UndecidableInstances #-}
+\end{code}
 
 \begin{code}
 module P (testRun) where
@@ -332,8 +335,8 @@ The thing is that we can give it an identity function or some lifter such that i
 
 Probably better with reintepret? Than we can move Proc r as the last handler. Might make stuff easier.
 \begin{code}
-runProc :: (LastMember DP.Process effs) => HVect (HandlerListM r) -> Eff (Proc r ': effs) a -> Eff effs a
-runProc hl effs = interpretM (\case
+runProc :: HVect (HandlerListM r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
+runProc hl effs = translate (\case
                                 Spawn sl eff -> DP.spawnLocal (runHandlerM sl eff)
                                 Call sl eff -> DP.callLocal (runHandlerM sl eff)
                                 Send pid id -> DP.send pid id
@@ -355,21 +358,24 @@ Maybe we can drop the proxy with something else, or wrap it in some kind of gadt
 Adding a flatten for s will probably suffice
 \begin{code}
 
-call :: (SubListRep s r, LastMember (Proc r) effs) => Eff s a -> Eff effs a
+call :: (SubListRep (FlattenProc s) (FlattenProc r), LastMember (Proc r) effs) => Eff s a -> Eff effs a
 call eff = undefined
+
+callProc :: (SubListRep (FlattenProc s) (FlattenProc r), (SubListRep (FlattenProc k) (FlattenProc r)), LastMember (Proc k) s, LastMember (Proc r) effs) => Eff s a -> Eff effs a
+callProc eff = undefined
 \end{code}
 
 \begin{code}
 hh :: Eff '[FR.Reader Int] Int
 hh = FR.ask
 
-gh :: Eff '[FR.Reader String] String
+gh :: Eff '[FR.Reader String, Proc '[]] String
 gh = FR.ask
 
-f :: Eff [FR.Reader String, FR.Reader Int, DP.Process] ()
+f :: Eff [FR.Reader String, FR.Reader Int, Proc '[]] ()
 f = do s <- FR.ask @String
        i <- FR.ask @Int
-       sendM $ liftIO $ putStrLn (s ++ show i)
+       sendIO $ putStrLn (s ++ show i)
 \end{code}
 Using implicitparameters does make it easier to change. We should however add defaultsignatures such that the first is
 choosen by default
@@ -384,15 +390,19 @@ Je kunt alleen maar substractive synthesis niet additive synthesis.
 Dus als je iets echt wilt moet het of vooraan, of achteraan staan.
 als nog kun je met commando's wel zeggen dat proc niet perse achteraan hoeft te staan?
 \begin{code}
+
+sendIO :: (LastMember (Proc r) effs) => IO a -> Eff effs a
+sendIO = undefined
+
 g :: Eff '[FR.Reader Int, Proc '[FR.Reader String]] ()
 g = do s <- call gh
        i <- FR.ask @Int
-       liftIO $ putStrLn (s ++ show i)
+       sendIO $ putStrLn (s ++ show i)
 
 h :: Eff '[FR.Reader String, Proc '[FR.Reader Int]] ()
 h = do i <- call hh
        s <- FR.ask @String
-       liftIO $ putStrLn (s ++ show i)
+       sendIO $ putStrLn (s ++ show i)
 
 \end{code}
 
@@ -408,5 +418,18 @@ i = do i <- call hh
 j :: Eff '[Proc '[FR.Reader String, FR.Reader Int]] ()
 j = do i <- call hh
        s <- call gh
-       liftIO $ putStrLn (s ++ show i)
+       sendIO $ putStrLn (s ++ show i)
 \end{code}
+
+\begin{code}
+type family FlattenProc xs where
+  FlattenProc (Proc r ': xs) = FlattenProc r :++: FlattenProc xs
+  FlattenProc (x ': xs) = x ': FlattenProc xs
+  FlattenProc '[] = '[]
+\end{code}
+
+Wrap constraints into a type, and possible use a type family such that a single constraint can be used?
+
+Nodig is een lift into
+
+Eff effs a -> Eff effs: proc '[]
