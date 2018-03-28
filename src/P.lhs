@@ -96,18 +96,21 @@ that would however require natural numbers arithmetic
 Might be possible to reduce the amount tof code by letting runList call runListM
 
 lesson: don't try to combine -> substract
-\begin{code}
 
 type family InitVect xs :: [* -> *] where
    InitVect '[x] = '[]
    InitVect (t ': ts) = t ': (InitVect ts)
 
+InitVect necessary anymore since we can get the InitVect effect using HandlerListM with injectivivity
+
+\begin{code}
 type family LastVect xs :: [* -> *] where
    LastVect '[x] = '[x]
    LastVect (t ': ts) = LastVect ts
 \end{code}
 
-It could very well be that LastVect is exactly defined as LastMember
+LastVect might be replacible by LastMember, but it is not a drop in replacement, and seems to need (unsafe) coercing that
+is more cumbersome that the (LastVect effs ~ '[m]) coercing we do now.
 
 \begin{code}
 runHandlerM :: (LastVect effs ~ '[m], Monad m) => HVect (HandlerListM effs) -> Eff effs a -> m a
@@ -329,3 +332,7 @@ runProc hl effs = interpretM (\case
 Probably need to rewrite the GADT slightly to make subproc operations easier
 Looks like the sublist proof could still just work rather than passing Handerlist explicit
 -> Ask could probably not be completely list since we need to make sub procs.
+
+Do something with rebindable do to keep the syntax minimalistic.
+
+Subtype, zal ook weer iets van sublist worden.
