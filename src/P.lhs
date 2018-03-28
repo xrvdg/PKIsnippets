@@ -304,8 +304,8 @@ En het bevat de argument waar je mee wilt werken. Het enige dat het nog mist is 
 
 \begin{code}
 data Proc (r :: [* -> *]) a where
-  Spawn ::  (LastVect r' ~ '[m], MonadIO m) => HVect (HandlerListM r') -> Eff r' () -> Proc r PID
-  Call ::   (LastVect r' ~ '[m], MonadIO m) => HVect (HandlerListM r') -> Eff r' a -> Proc r a
+  Spawn ::  (LastVect r' ~ '[DP.Process]) => HVect (HandlerListM r') -> Eff r' () -> Proc r PID
+  Call ::   (LastVect r' ~ '[DP.Process]) => HVect (HandlerListM r') -> Eff r' a -> Proc r a
   Ask :: Proc r (HVect (HandlerListM r))
   Send  :: DS.Serializable a => PID -> a ->  Proc r ()
   Expect :: DS.Serializable a => Proc r a
@@ -320,8 +320,12 @@ The thing is that we can give it an identity function or some lifter such that i
 runProc :: (LastMember DP.Process effs) => HVect (HandlerListM r) -> Eff (Proc r ': effs) a -> Eff effs a
 runProc hl effs = interpretM (\case
                                 Ask -> return hl
-                                Spawn sl eff -> DP.spawnLocal (liftIO (runHandlerM sl eff))
-                                Call sl eff -> DP.callLocal (liftIO (runHandlerM sl eff))
+                                Spawn sl eff -> DP.spawnLocal (runHandlerM sl eff)
+                                Call sl eff -> DP.callLocal (runHandlerM sl eff)
                                 Send pid id -> DP.send pid id
                                 Expect -> DP.expect) effs
 \end{code}
+
+Probably need to rewrite the GADT slightly to make subproc operations easier
+Looks like the sublist proof could still just work rather than passing Handerlist explicit
+-> Ask could probably not be completely list since we need to make sub procs.
