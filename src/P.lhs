@@ -37,9 +37,11 @@ import qualified Control.Monad.Freer.Reader as FR
 import qualified Control.Monad.Freer.State as FS
 import Data.HVect as HV
 import Data.OpenUnion ((:++:))
-import Control.Distributed.Process (ProcessId, liftIO, Process, spawnLocal)
+import qualified Control.Distributed.Process as DP
+import qualified Control.Distributed.Process.Serializable as DS
 import Data.Proxy
 import Unsafe.Coerce
+import Data.Coerce
 import Debug.Trace
 import Control.Monad.IO.Class
 \end{code}
@@ -49,29 +51,13 @@ For the IO tests
 import System.Exit hiding (ExitCode(ExitSuccess))
 \end{code}
 
+
+
+Handler has an explicit effs such that constraints that handlers have are easily checked.
+Trying to also store constraints seemed to be more difficult.
 \begin{code}
-type PID = ProcessId
-\end{code}
+data Handler b effs = Handler (forall a. Eff (b ': effs) a -> Eff effs a)
 
-En het bevat de argument waar je mee wilt werken. Het enige dat het nog mist is de effect
-
-\begin{code}
-data RunList (r :: [* -> *])
-data Proc r a where
-  Spawn ::   RunList r' -> Eff r' () -> Proc r PID
-  Call ::   RunList r' -> Eff r' () -> Proc r PID
-  Send  :: a -> PID ->  Proc r a
-  Expect :: Proc r a
-\end{code}
-
-\begin{code}
-
-runPure :: HVect '[] -> Eff '[] a -> a
-runPure HNil = run
-
-type Handler b effs a = Eff (b ': effs) a -> Eff effs a
-
--- data HandlerM b effs a n = (LastMember n effs, Monad n) => HandlerM {runHandlerM :: Eff (b ': effs) a -> Eff effs a}
 
 \end{code}
 runList :: forall eff effs a . HVect (HandlerList (eff ': effs) a) -> Eff (eff ': effs) a -> Eff '[] a
@@ -87,14 +73,17 @@ Misschien iets van een length check voor HandlerList en effs toevoegen? Op die m
 te reducren voor de compiler
 \begin{code}
 
-runHandler :: HVect (HandlerList effs a) -> Eff effs a -> a
-runHandler hl eff = run (runList hl eff)
+runHandler :: Handler b effs -> Eff (b ': effs) a -> Eff effs a
+runHandler (Handler f) = f
 
-runList :: HVect (HandlerList effs a) -> Eff effs a -> Eff '[] a
+runHandlers :: HVect (HandlerList effs) -> Eff effs a -> a
+runHandlers hl eff = run (runList hl eff)
+
+runList :: HVect (HandlerList effs) -> Eff effs a -> Eff '[] a
 runList HNil fect = unsafeCoerce fect
-runList (r :&: rs) fect = runList (unsafeCoerce rs) (r' fect')
+runList (r :&: rs) fect = runList (unsafeCoerce rs) (runHandler r' fect')
   where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
-        r' = (unsafeCoerce r) :: Handler eff' effs' a
+        r' = (unsafeCoerce r) :: Handler eff' effs'
 
 \end{code}
 
@@ -116,15 +105,19 @@ type family InitVect xs :: [* -> *] where
 type family LastVect xs :: [* -> *] where
    LastVect '[x] = '[x]
    LastVect (t ': ts) = LastVect ts
+\end{code}
 
-runHandlerM :: (LastVect effs ~ '[m], Monad m) => HVect (HandlerListM effs a) -> Eff effs a -> m a
+It could very well be that LastVect is exactly defined as LastMember
+
+\begin{code}
+runHandlerM :: (LastVect effs ~ '[m], Monad m) => HVect (HandlerListM effs) -> Eff effs a -> m a
 runHandlerM hl eff = runM (runListM hl eff)
 
-runListM :: HVect (HandlerListM effs a) -> Eff effs a -> Eff (LastVect effs) a
+runListM :: HVect (HandlerListM effs) -> Eff effs a -> Eff (LastVect effs) a
 runListM HNil fect = unsafeCoerce fect
-runListM (r :&: rs) fect = unsafeCoerce (runListM (unsafeCoerce rs) (r' fect'))
+runListM (r :&: rs) fect = unsafeCoerce (runListM (unsafeCoerce rs) (runHandler r' fect'))
   where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
-        r' = (unsafeCoerce r) :: Handler eff' effs' a
+        r' = (unsafeCoerce r) :: Handler eff' effs'
 \end{code}
 This runListSafe doesn't work since we cant signal to the compiler that hwne HNil that its type is HVect  '[]
 
@@ -170,29 +163,29 @@ testRun2 = run $ runHeadList rsl _
 
 \begin{code}
 test1Run3 :: Int
-test1Run3 = run (runList ((FS.evalState 3) :&: HNil) test1)
+test1Run3 = run (runList ((Handler (FS.evalState 3)) :&: HNil) test1)
 
 test2Run3 :: Int
-test2Run3 = run (runList ((FR.runReader 5) :&: HNil) test2)
+test2Run3 = run (runList (Handler (FR.runReader 5) :&: HNil) test2)
 
 testRun3 :: Int
-testRun3 = run (runList ((FR.runReader 5) :&: (FS.evalState 3) :&: HNil) test)
+testRun3 = run (runList (Handler (FR.runReader 5) :&: Handler (FS.evalState 3) :&: HNil) test)
 \end{code}
 
 Make handlerlist be non-empty such that it can be injective.
 This is used to be able to work with SubLists.
 \begin{code}
-type family HandlerList effs a = result | result -> effs a where
-  HandlerList '[eff] a = '[(Handler eff '[] a)]
-  HandlerList (eff ': effs) a = (Handler eff effs a) ': HandlerList effs a
+type family HandlerList effs = result | result -> effs where
+  HandlerList '[] = '[]
+  HandlerList (eff ': effs) = (Handler eff effs) ': HandlerList effs
 \end{code}
 
 We instroduce an extra list for handlers such that we get one entry less, but that this last
 entry is still recorded in the effects lists. That is why Handerlist in combination with InitVect didn't work
 \begin{code}
-type family HandlerListM effs a = result | result -> effs a where
-  HandlerListM '[eff, m] a = '[(Handler eff '[m] a)]
-  HandlerListM (eff ': effs) a = (Handler eff effs a) ': HandlerListM effs a
+type family HandlerListM effs where
+  HandlerListM '[eff, m] = '[Handler eff '[m]]
+  HandlerListM (eff ': effs) = (Handler eff effs) ': HandlerListM effs
 \end{code}
 
 HVectElim looks interesting just do not know how to apply it
@@ -231,9 +224,12 @@ testIO = do putStrLn' "Hello, World"
 
 testIORun :: IO ()
 testIORun = runConsole testIO
+\end{code}
 
-testIORun2 :: Eff '[IO] ()
-testIORun2 = runListM (runConsole' :&: HNil) testIO
+The following is a nice test to check if adding constrains also works
+\begin{code}
+testIORun2 :: IO ()
+testIORun2 = runHandlerM (Handler runConsole' :&: HNil) testIO
 \end{code}
 
 Having a type family flatten might drop the need for having to split interpreters. Is het echter voldoende om te weten
@@ -287,8 +283,8 @@ data SubListHL (xs :: HandlerList effs a) (ys :: HandlerList effs2 a) where
 
 Can't drop the a unless we find a way to drop it in Handerlist a
 \begin{code}
-type SubListL s r a = (SubListRep (HandlerList s a) (HandlerList r a))
-extractHandler :: SubListL s r a => HVect (HandlerList r a) -> HVect (HandlerList s a)
+type SubListL s r = (SubListRep (HandlerList s) (HandlerList r))
+extractHandler :: SubListL s r => HVect (HandlerList r) -> HVect (HandlerList s)
 extractHandler = extractHVect
 \end{code}
 
@@ -298,4 +294,34 @@ Lesson: Also allowed me to drop the polykinds extention
 
 \begin{code}
 
+\end{code}
+
+\begin{code}
+type PID = DP.ProcessId
+\end{code}
+
+En het bevat de argument waar je mee wilt werken. Het enige dat het nog mist is de effect
+
+\begin{code}
+data Proc (r :: [* -> *]) a where
+  Spawn ::  (LastVect r' ~ '[m], MonadIO m) => HVect (HandlerListM r') -> Eff r' () -> Proc r PID
+  Call ::   (LastVect r' ~ '[m], MonadIO m) => HVect (HandlerListM r') -> Eff r' a -> Proc r a
+  Ask :: Proc r (HVect (HandlerListM r))
+  Send  :: DS.Serializable a => PID -> a ->  Proc r ()
+  Expect :: DS.Serializable a => Proc r a
+\end{code}
+Since we now have subset proof those are probably cheaper to pass. But lets first keep it at run instances.
+-> Not going to work due to needing it when spawning
+
+Probably it is always going to need a proc instance.
+The thing is that we can give it an identity function or some lifter such that it can't do much
+
+\begin{code}
+runProc :: (LastMember DP.Process effs) => HVect (HandlerListM r) -> Eff (Proc r ': effs) a -> Eff effs a
+runProc hl effs = interpretM (\case
+                                Ask -> return hl
+                                Spawn sl eff -> DP.spawnLocal (liftIO (runHandlerM sl eff))
+                                Call sl eff -> DP.callLocal (liftIO (runHandlerM sl eff))
+                                Send pid id -> DP.send pid id
+                                Expect -> DP.expect) effs
 \end{code}
