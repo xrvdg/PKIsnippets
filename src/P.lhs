@@ -78,12 +78,13 @@ Trying to also store constraints seemed to be more difficult.
 \begin{code}
 
 data Handler b effs = Handler (forall a. Eff (b ': effs) a -> Eff effs a)
-
---data HVect (xs :: [*]) where
---  HNil :: HVect '[]
---  (:&:) :: k -> HVect ts -> HVect (k ': ts)
-
 \end{code}
+
+Defining our own HVect in this file doesn't work since we use polykinds
+data HVect (xs :: [*]) where
+  HNil :: HVect '[]
+  (:&:) :: k -> HVect ts -> HVect (k ': ts)
+
 runList :: forall eff effs a . HVect (HandlerList (eff ': effs) a) -> Eff (eff ': effs) a -> Eff '[] a
 runList (r :&: HNil) fect = let r' = (unsafeCoerce r) :: (Handler eff '[] a)
                                 fect' = (unsafeCoerce fect) :: Eff '[eff] a
@@ -319,11 +320,32 @@ type SubListL s r = (SubListRep (HandlerList s) (HandlerList r))
 extractHandler :: SubListL s r => HVect (HandlerList r) -> HVect (HandlerList s)
 extractHandler = extractHVect
 
-type family AppendVect (xs :: [k]) (ys :: [k]) where
+class SNatRep n where
+    getSNat :: SNat n
+
+instance SNatRep 'Zero where
+    getSNat = SZero
+
+instance SNatRep n => SNatRep ('Succ n) where
+    getSNat = SSucc getSNat
+
+extractHandlers :: forall n s r.
+  (SNatRep n, AppendVect
+     (TakeVect n (HandlerList s)) (DropVect n (HandlerList s))
+   ~
+   HandlerList s,
+   LenVect (TakeVect n (HandlerList s)) ~ n,
+   SubListRep (HandlerList s) (HandlerList r)) =>
+  HVect (HandlerList r)
+  -> (HVect (TakeVect n (HandlerList s)),
+      HVect (DropVect n (HandlerList s))) 
+extractHandlers ss = splitVectB getSNat (extractHandler ss)
+
+type family AppendVect xs ys where
   AppendVect '[] bs = bs
   AppendVect (a ': as) bs = a ': (AppendVect as bs)
 
-type family LenVect (xs :: [* -> *]) where
+type family LenVect xs where
   LenVect '[] = Zero
   LenVect (t ': ts) = Succ (LenVect ts)
 
@@ -517,4 +539,6 @@ dropVect (SSucc m) (r :&: rs) = dropVect m rs
 splitVect :: SNat n -> HVect xs -> SplitAtVect n xs
 splitVect n xs = (takeVect n xs, dropVect n xs)
 
+splitVectB :: (LenVect ss' ~ n, ss ~ AppendVect ss' ks, DropVect n ss ~ ks, TakeVect n ss ~ ss') => SNat n -> HVect ss -> (HVect ss', HVect ks)
+splitVectB n xs = splitVect n xs
 \end{code}
