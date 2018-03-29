@@ -45,6 +45,7 @@ import Control.Monad.Freer
 import qualified Control.Monad.Freer.Internal as FI
 import qualified Control.Monad.Freer.Reader as FR
 import qualified Control.Monad.Freer.State as FS
+--import Data.HVect (SNat(..), Nat (..))
 import Data.HVect as HV
 import Data.OpenUnion ((:++:))
 import qualified Control.Distributed.Process as DP
@@ -54,17 +55,23 @@ import Unsafe.Coerce
 import Data.Coerce
 import Debug.Trace
 import Control.Monad.IO.Class
+import Data.Kind
+\end{code}
+
+Singletons would probably work if the library was setup a little bit differently.
+But we are working with GADTs so just dropping them in does not seem to work.
+We would like to use the s* functions to work with lists.
+But our handler is not promotable due to the GADTs it in turn depends on.
+And just using them for the few type families it has has a too big cost.
 import qualified Data.Singletons.Prelude.List as SL
 import qualified Data.Singletons.TypeLits as STL
 import qualified Data.Singletons.Prelude.Num as SN
-\end{code}
+import qualified Data.Singletons.TH as STH
 
 For the IO tests
 \begin{code}
 import System.Exit hiding (ExitCode(ExitSuccess))
 \end{code}
-
-
 
 Handler has an explicit effs such that constraints that handlers have are easily checked.
 Trying to also store constraints seemed to be more difficult.
@@ -72,6 +79,9 @@ Trying to also store constraints seemed to be more difficult.
 
 data Handler b effs = Handler (forall a. Eff (b ': effs) a -> Eff effs a)
 
+--data HVect (xs :: [*]) where
+--  HNil :: HVect '[]
+--  (:&:) :: k -> HVect ts -> HVect (k ': ts)
 
 \end{code}
 runList :: forall eff effs a . HVect (HandlerList (eff ': effs) a) -> Eff (eff ': effs) a -> Eff '[] a
@@ -118,7 +128,7 @@ type family InitVect xs :: [* -> *] where
 InitVect necessary anymore since we can get the InitVect effect using HandlerListM with injectivivity
 
 \begin{code}
-type family LastVect xs :: [* -> *] where
+type family LastVect xs :: [k] where
    LastVect '[x] = '[x]
    LastVect (t ': ts) = LastVect ts
 \end{code}
@@ -192,7 +202,7 @@ testRun3 = run (runList (Handler (FR.runReader 5) :&: Handler (FS.evalState 3) :
 Make handlerlist be non-empty such that it can be injective.
 This is used to be able to work with SubLists.
 \begin{code}
-type family HandlerList effs = result | result -> effs where
+type family HandlerList (effs :: [* -> *]) = result | result -> effs where
   HandlerList '[] = '[]
   HandlerList (eff ': effs) = (Handler eff effs) ': HandlerList effs
 \end{code}
@@ -200,7 +210,7 @@ type family HandlerList effs = result | result -> effs where
 We instroduce an extra list for handlers such that we get one entry less, but that this last
 entry is still recorded in the effects lists. That is why Handerlist in combination with InitVect didn't work
 \begin{code}
-type family HandlerListM effs where
+type family HandlerListM (effs :: [* -> *]) where
   HandlerListM '[eff, m] = '[Handler eff '[m]]
   HandlerListM (eff ': effs) = (Handler eff effs) ': HandlerListM effs
 \end{code}
@@ -305,8 +315,18 @@ data SubListHL (xs :: HandlerList effs a) (ys :: HandlerList effs2 a) where
 Can't drop the a unless we find a way to drop it in Handerlist a
 \begin{code}
 type SubListL s r = (SubListRep (HandlerList s) (HandlerList r))
+
 extractHandler :: SubListL s r => HVect (HandlerList r) -> HVect (HandlerList s)
 extractHandler = extractHVect
+
+type family AppendVect (xs :: [k]) (ys :: [k]) where
+  AppendVect '[] bs = bs
+  AppendVect (a ': as) bs = a ': (AppendVect as bs)
+
+type family LenVect (xs :: [* -> *]) where
+  LenVect '[] = Zero
+  LenVect (t ': ts) = Succ (LenVect ts)
+
 \end{code}
 
 Lesson: keep your steps as simple as possible. That way you might be able to use types without coercing
@@ -346,8 +366,8 @@ Probably better with reintepret? Than we can move Proc r as the last handler. Mi
 \begin{code}
 runProc :: HVect (HandlerListM r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
 runProc hl effs = translate (\case
-                                Spawn sl eff -> DP.spawnLocal (runProc $ runHandlerM sl eff)
-                                Call sl eff -> DP.callLocal (runM runProc $ runHandlerM sl eff)
+  --                              Spawn sl eff -> DP.spawnLocal (runProc $ runHandlerM sl eff)
+ --                               Call sl eff -> DP.callLocal (runM runProc $ runHandlerM sl eff)
                                 Send pid id -> DP.send pid id
                                 Expect -> DP.expect) effs
 \end{code}
@@ -472,17 +492,29 @@ Als je weet dat s' ++ k in zijn geheel een sublist is van r, dan zitten alle ben
 
 takevect probably needs to be coerced because we can't compare functions.
 Or we add a Eq type for Handler which is not really equal.
+
+Here we use strict take and drops, since that is what we need and it helps with type inference
 \begin{code}
 type family SplitAtVect n xs where
-  SplitAtVect n xs = (HVect (SL.Take n xs), HVect (SL.Drop n xs))
+  SplitAtVect n xs = (HVect (TakeVect n xs), HVect (DropVect n xs))
 
-takeVect :: STL.SNat n -> HVect xs -> HVect (SL.Take n xs)
-takeVect n HNil = HNil
-takeVect n r = _
+type family TakeVect n xs where
+  TakeVect Zero xs = '[]
+  TakeVect (Succ m) (x ': xs) = x ': TakeVect m xs
 
-dropVect :: STL.SNat n -> HVect xs -> HVect (SL.Drop n xs)
-dropVect n HNil = HNil
+type family DropVect n xs where
+  DropVect Zero xs = xs
+  DropVect (Succ m) (x ': xs) = DropVect m xs
 
-splitVect :: STL.SNat n -> HVect xs -> SplitAtVect n xs
+takeVect :: SNat n -> HVect xs -> HVect (TakeVect n xs)
+takeVect SZero xs = HNil
+takeVect (SSucc m) (r :&: rs) = r :&: (takeVect m rs)
+
+dropVect :: SNat n -> HVect xs -> HVect (DropVect n xs)
+dropVect SZero xs = xs
+dropVect (SSucc m) (r :&: rs) = dropVect m rs
+
+splitVect :: SNat n -> HVect xs -> SplitAtVect n xs
 splitVect n xs = (takeVect n xs, dropVect n xs)
+
 \end{code}
