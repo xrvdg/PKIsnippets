@@ -329,16 +329,16 @@ instance SNatRep 'Zero where
 instance SNatRep n => SNatRep ('Succ n) where
     getSNat = SSucc getSNat
 
-extractHandlers :: forall n s r.
-  (SNatRep n, AppendVect
-     (TakeVect n (HandlerList s)) (DropVect n (HandlerList s))
-   ~
-   HandlerList s,
-   LenVect (TakeVect n (HandlerList s)) ~ n,
-   SubListRep (HandlerList s) (HandlerList r)) =>
-  HVect (HandlerList r)
-  -> (HVect (TakeVect n (HandlerList s)),
-      HVect (DropVect n (HandlerList s))) 
+extractHandlers ::
+  (SNatRep n,
+   ss ~ HandlerList s,
+   rs ~ HandlerList r,
+   tss ~ TakeVect n (HandlerList s),
+   dss ~ DropVect n (HandlerList s),
+   AppendVect tss dss ~ ss,
+   LenVect tss ~ n,
+   SubListRep ss rs) =>
+  HVect rs -> (HVect tss, HVect dss)
 extractHandlers ss = splitVectB getSNat (extractHandler ss)
 
 type family AppendVect xs ys where
