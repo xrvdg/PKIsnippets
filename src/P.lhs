@@ -54,6 +54,9 @@ import Unsafe.Coerce
 import Data.Coerce
 import Debug.Trace
 import Control.Monad.IO.Class
+import qualified Data.Singletons.Prelude.List as SL
+import qualified Data.Singletons.TypeLits as STL
+import qualified Data.Singletons.Prelude.Num as SN
 \end{code}
 
 For the IO tests
@@ -66,6 +69,7 @@ import System.Exit hiding (ExitCode(ExitSuccess))
 Handler has an explicit effs such that constraints that handlers have are easily checked.
 Trying to also store constraints seemed to be more difficult.
 \begin{code}
+
 data Handler b effs = Handler (forall a. Eff (b ': effs) a -> Eff effs a)
 
 
@@ -320,10 +324,15 @@ type PID = DP.ProcessId
 En het bevat de argument waar je mee wilt werken. Het enige dat het nog mist is de effect
 
 TODO add lift IO
+
+For now we assume that Proc inside proc is not allowed.
+
+Use the transitivity property of sublist
+
 \begin{code}
 data Proc (r :: [* -> *]) a where
-  Spawn ::  (LastVect r' ~ '[DP.Process]) => HVect (HandlerListM r') -> Eff r' () -> Proc r PID
-  Call ::   (LastVect r' ~ '[DP.Process]) => HVect (HandlerListM r') -> Eff r' a -> Proc r a
+  Spawn ::  (LastVect s ~ '[Proc k], SubListRep (FlattenProc s) r) => Eff s () -> Proc r PID
+  Call ::   (LastVect r' ~ '[Proc k]) => HVect (HandlerListM r') -> Eff r' a -> Proc r a
   Send  :: DS.Serializable a => PID -> a ->  Proc r ()
   Expect :: DS.Serializable a => Proc r a
 \end{code}
@@ -337,8 +346,8 @@ Probably better with reintepret? Than we can move Proc r as the last handler. Mi
 \begin{code}
 runProc :: HVect (HandlerListM r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
 runProc hl effs = translate (\case
-                                Spawn sl eff -> DP.spawnLocal (runHandlerM sl eff)
-                                Call sl eff -> DP.callLocal (runHandlerM sl eff)
+                                Spawn sl eff -> DP.spawnLocal (runProc $ runHandlerM sl eff)
+                                Call sl eff -> DP.callLocal (runM runProc $ runHandlerM sl eff)
                                 Send pid id -> DP.send pid id
                                 Expect -> DP.expect) effs
 \end{code}
@@ -432,4 +441,48 @@ Wrap constraints into a type, and possible use a type family such that a single 
 
 Nodig is een lift into
 
-Eff effs a -> Eff effs: proc '[]
+De processes zullen van drie soorten zijn nadat alle handler zijn uitgevoerd:
+- puur -> Eff '[] a. Deze zijn in proc te krijgen met raise
+- IO -> Eff '[IO] a
+- Process -> Eff '[Process] a of Eff '[Proc r] a
+
+Van Eff '[IO] a naar Eff '[Process] a is een translate met liftio
+Van Eff '[IO] a naar Eff ''
+
+Stel we vereisen niet/gaan er van uit dat Proc r niet nog een Proc bevalt (Proc '[...., Proc]')
+Dan is Handler r een lijst van alle handlers die we mogen gebruiken.
+
+Gezien we runListM kunnen gebruiken willen we dus eigenlijk
+InitVect s als handlerlist
+
+Dit is wat we willen hebben
+createHandler (LastMember (Proc k) s) (SubListRep k r) => Handerlist r -> Handerlist s
+
+Waar dus de laatste entry van Handerlist s -> Handler (Proc k) '[]
+
+easy is
+
+createHandler (LastMember (Proc k) s) (SubListRep k r) => Handerlist r -> Handerlist s
+
+
+Alle handlers in r mogen gebruikt worden.
+Alle handeler in r, die nog niet voor de handlers van k zijn ge
+
+Als je weet dat s' ++ k in zijn geheel een sublist is van r, dan zitten alle benodigde handlers in r
+
+takevect probably needs to be coerced because we can't compare functions.
+Or we add a Eq type for Handler which is not really equal.
+\begin{code}
+type family SplitAtVect n xs where
+  SplitAtVect n xs = (HVect (SL.Take n xs), HVect (SL.Drop n xs))
+
+takeVect :: STL.SNat n -> HVect xs -> HVect (SL.Take n xs)
+takeVect n HNil = HNil
+takeVect n r = _
+
+dropVect :: STL.SNat n -> HVect xs -> HVect (SL.Drop n xs)
+dropVect n HNil = HNil
+
+splitVect :: STL.SNat n -> HVect xs -> SplitAtVect n xs
+splitVect n xs = (takeVect n xs, dropVect n xs)
+\end{code}
