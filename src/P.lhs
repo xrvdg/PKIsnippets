@@ -2,66 +2,74 @@ To allow type level lists
 \begin{code}
 {-# language KindSignatures, DataKinds, TypeOperators #-}
 \end{code}
+
+Need Rank2Types more often than not
 \begin{code}
 {-# language RankNTypes #-}
 \end{code}
+
 To allow the definition of effects
 \begin{code}
 {-# language GADTs #-}
 \end{code}
+
+Type families are used heavy for all kinds of dependently typed programming.
+For the more difficult cases typefamilydependencies helps the compiler resolve it.
 \begin{code}
 {-# language TypeFamilies, TypeFamilyDependencies #-}
 \end{code}
+
 Required for gets
 \begin{code}
 {-# language TypeApplications #-}
 \end{code}
 
-For the IO test
+Makes writing handler a litte bit nicer
 \begin{code}
 {-# language LambdaCase #-}
+\end{code}
+
+required to be able to work with Member, Lastmember
+\begin{code}
 {-# language FlexibleContexts #-}
 \end{code}
 
-For SubListRep
 \begin{code}
 {-# language MultiParamTypeClasses, FlexibleInstances #-}
-{-# language ConstraintKinds #-}
 \end{code}
 
+We need polykinds for the sublist and lastvect since we use them on both [*] as [*->*]
 \begin{code}
 {-# language PolyKinds #-}
 \end{code}
-\begin{code}
-{-# language ImplicitParams #-}
-\end{code}
+
+Required for the splitvect handling
 \begin{code}
 {-# language UndecidableInstances #-}
 \end{code}
+
+Not strictly necessary but does make it easier to write code that uses unsafeCoerce in a somewhat safer manner
 \begin{code}
 {-# language ScopedTypeVariables #-}
 \end{code}
-
 \begin{code}
-module P (testRun) where
+module P () where
 import Control.Monad.Freer
-import Control.Monad
-import qualified Control.Monad.Freer.Internal as FI
-import qualified Control.Monad.Freer.Reader as FR
-import qualified Control.Monad.Freer.State as FS
---import Data.HVect (SNat(..), Nat (..))
+import Control.Monad (void)
 import Data.HVect as HV
-import Data.OpenUnion ((:++:))
 import qualified Control.Distributed.Process as DP
 import qualified Control.Distributed.Process.Serializable as DS
 import qualified Control.Distributed.Process.Node as Node
 import Control.Distributed.Process.Backend.SimpleLocalnet (initializeBackend, newLocalNode)
-import Data.Proxy
 import Unsafe.Coerce
-import Data.Coerce
-import Debug.Trace
+\end{code}
+
+Below is required for the test
+\begin{code}
+import qualified Control.Monad.Freer.Internal as FI
+import qualified Control.Monad.Freer.Reader as FR
+import qualified Control.Monad.Freer.State as FS
 import Control.Monad.IO.Class
-import Data.Kind
 \end{code}
 
 Singletons would probably work if the library was setup a little bit differently.
@@ -322,7 +330,6 @@ data SubListHL (xs :: HandlerList effs a) (ys :: HandlerList effs2 a) where
 
 Can't drop the a unless we find a way to drop it in Handerlist a
 \begin{code}
-type SubListL s r = (SubListRep (HandlerList s) (HandlerList r))
 
 extractHandler :: SubList (HandlerList s) (HandlerList r) -> HVect (HandlerList r) -> HVect (HandlerList s)
 extractHandler Base r = HNil
@@ -436,12 +443,23 @@ runProc hl effs = translate (\case
                                 Send pid id -> DP.send pid id
                                 Expect -> DP.expect) effs
 
+\end{code}
+
+The sublist encoding of s and r or the sublist of a function list on s and r are the same.
+Therefore we can convert one in the other.
+\begin{code}
 convertSublist :: SubList s r -> SubList (HandlerList s) (HandlerList r)
 convertSublist = unsafeCoerce
+\end{code}
 
+The freer-simple library has support for sending to arbitrary member or the last member when that member is a monad.
+We need to be able to send to the last member, but don't require that the last member is a monad.
+\begin{code}
 sendL :: (LastMember l effs) => l a -> Eff effs a
 sendL = send
+\end{code}
 
+\begin{code}
 type family TillProc xs where
   TillProc '[Proc ks] = '[]
   TillProc '[] = '[]
@@ -451,6 +469,7 @@ type family GetProcContent xs where
   GetProcContent '[Proc ks] = ks
   GetProcContent '[] = '[]
   GetProcContent (x ': xs) = GetProcContent xs
+
 
 call :: (
   SNatRep n,
@@ -533,6 +552,15 @@ hh = FR.ask
 gh :: Eff '[FR.Reader String] String
 gh = FR.ask
 
+\end{code}
+
+Currently function that what to use IO functionality need to be explicitely augmented with Proc '[].
+This could be fixed by introducing an spawnIO/callIO functions or by going through the Union (The effs) which takes the content of the last entry
+and puts a DP.liftIO before it.
+
+liftIO :: (LastMember IO s, ss ~ InitVect effs, r ~ AppendVect '[Proc '[]]) => Eff s a -> Eff r a
+
+\begin{code}
 f :: Eff [FR.Reader String, FR.Reader Int, Proc '[]] ()
 f = do s <- FR.ask @String
        i <- FR.ask @Int
@@ -630,6 +658,9 @@ Here we use strict take and drops, since that is what we need and it helps with 
 type family SplitAtVect n xs where
   SplitAtVect n xs = (HVect (TakeVect n xs), HVect (DropVect n xs))
 
+splitVect :: SNat n -> HVect xs -> SplitAtVect n xs
+splitVect n xs = (takeVect n xs, dropVect n xs)
+
 type family TakeVect n xs where
   TakeVect Zero xs = '[]
   TakeVect (Succ m) (x ': xs) = x ': TakeVect m xs
@@ -649,8 +680,6 @@ dropVect :: SNat n -> HVect xs -> HVect (DropVect n xs)
 dropVect SZero xs = xs
 dropVect (SSucc m) (r :&: rs) = dropVect m rs
 
-splitVect :: SNat n -> HVect xs -> SplitAtVect n xs
-splitVect n xs = (takeVect n xs, dropVect n xs)
 
 splitVectB :: (DropVect n ss ~ ks, TakeVect n ss ~ ss') => SNat n -> HVect ss -> (HVect ss', HVect ks)
 splitVectB n xs = splitVect n xs
