@@ -56,7 +56,6 @@ Not strictly necessary but does make it easier to write code that uses unsafeCoe
 module P () where
 import Control.Monad.Freer
 import Control.Monad (void)
-import Data.HVect as HV
 import qualified Control.Distributed.Process as DP
 import qualified Control.Distributed.Process.Serializable as DS
 import qualified Control.Distributed.Process.Node as Node
@@ -64,12 +63,24 @@ import Control.Distributed.Process.Backend.SimpleLocalnet (initializeBackend, ne
 import Unsafe.Coerce
 \end{code}
 
+TODO: What was the reason to have our own HVect.
+  -> The hope was by changing the kind of HVect that it would be possible to get
+     type inference. This however was not due to the limitation of HVect.
+Defining our own HVect in this file doesn't work since we use polykinds
+data HVect (xs :: [*]) where
+  HNil :: HVect '[]
+  (:&:) :: k -> HVect ts -> HVect (k ': ts)
+
+\begin{code}
+import Data.HVect as HV
+\end{code}
 Below is required for the test
 \begin{code}
 import qualified Control.Monad.Freer.Internal as FI
 import qualified Control.Monad.Freer.Reader as FR
 import qualified Control.Monad.Freer.State as FS
 import Control.Monad.IO.Class
+import System.Exit hiding (ExitCode(ExitSuccess))
 \end{code}
 
 Singletons would probably work if the library was setup a little bit differently.
@@ -82,105 +93,127 @@ import qualified Data.Singletons.TypeLits as STL
 import qualified Data.Singletons.Prelude.Num as SN
 import qualified Data.Singletons.TH as STH
 
-For the IO tests
-\begin{code}
-import System.Exit hiding (ExitCode(ExitSuccess))
-\end{code}
+The handler functions do typically not depend on a fixed structure of the effect list, but
+might have requirements for the last, and maybe even multiple members of the list.
+By encoding the entire effects list the functions we store can do their requirement inspection.
+Also tried to store constraints but that was harder. Making this datatype into a GADT might solve the
+problem, but not sure if this is going to have a benefit.
 
-Handler has an explicit effs such that constraints that handlers have are easily checked.
-Trying to also store constraints seemed to be more difficult.
 \begin{code}
-
+-- | The 'handler' data type allows to parameterize over the return type
+--  of effect handler functions. See the source for why the effects 'effs' need
+--- to be encoded. This data type is useful for creating function lists.
 data Handler b effs = Handler (forall a. Eff (b ': effs) a -> Eff effs a)
 \end{code}
 
-Defining our own HVect in this file doesn't work since we use polykinds
-data HVect (xs :: [*]) where
-  HNil :: HVect '[]
-  (:&:) :: k -> HVect ts -> HVect (k ': ts)
+Do note that a handler function can only work on a single function at the time.
+This was done such that the handler list can be easily be lock-stepped to the
+effect list. I am nearly certain that a flattened handler list equal to the effects lists
+will also as a strong enough invariant with the rest of the functions based the way
+the open union inside freer-simple is encoded. It would require some extra type families,
+functions and type classes.
 
-runList :: forall eff effs a . HVect (HandlerList (eff ': effs) a) -> Eff (eff ': effs) a -> Eff '[] a
-runList (r :&: HNil) fect = let r' = (unsafeCoerce r) :: (Handler eff '[] a)
-                                fect' = (unsafeCoerce fect) :: Eff '[eff] a
-                            in r' fect'
-runList (r :&: rs) fect =  let r' = (unsafeCoerce r) :: (Handler eff (eff' ': effs') a)
-                               fect' = (unsafeCoerce rs) :: Eff (eff ': eff' ': effs') a
-                               rs' = (unsafeCoerce rs) :: HVect (HandlerList (eff' ': effs') a)
-                           in runList rs' (r' fect')
-
-Misschien iets van een length check voor HandlerList en effs toevoegen? Op die manier zijn de twee wellicht beter
-te reducren voor de compiler
+Injectivity is required to be able to use SubList on HandlerList.
 \begin{code}
+-- | When writing type signatures for effect 'Handler' lists
+-- this type family takes care stripping a single effect for the
+-- next handler in the list.
+type family HandlerList effs = result | result -> effs where
+  HandlerList '[] = '[]
+  HandlerList (eff ': effs) = (Handler eff effs) ': HandlerList effs
+\end{code}
 
+We need an extra list for handlers such that the last entry is recored without having an handler.
+This requirement is not satisfied by combing InitVect and HandlerList.
+\begin{code}
+-- | Same as 'HandlerList' but strip till the last one.
+type family HandlerListL effs = result | result -> effs where
+  HandlerListL '[eff, m] = '[Handler eff '[m]]
+  HandlerListL (eff ': effs) = (Handler eff effs) ': HandlerListL effs
+\end{code}
+
+\begin{code}
+-- | Run a a single handler on a effect.
 runHandler :: Handler b effs -> Eff (b ': effs) a -> Eff effs a
 runHandler (Handler f) = f
 
+-- | Run all the handler on the effect and return the result of the effect.
+-- Note that this function is non-monadic. See runHandlerM for the
+-- monadic variant of this function.
 runHandlers :: HVect (HandlerList effs) -> Eff effs a -> a
 runHandlers hl eff = run (runList hl eff)
 
+-- | Similar to 'runHandlers' but do not strip the pure effect shell.
 runList :: HVect (HandlerList effs) -> Eff effs a -> Eff '[] a
 runList HNil fect = unsafeCoerce fect
 runList (r :&: rs) fect = runList (unsafeCoerce rs) (runHandler r' fect')
   where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
         r' = (unsafeCoerce r) :: Handler eff' effs'
-
 \end{code}
 
-Since we do not only want to run pure computations but also with monads
-we need to run till the last one.
-
-A different possibiltiy might be to encode the list length and based on that create something
-that would however require natural numbers arithmetic
-
-Might be possible to reduce the amount tof code by letting runList call runListM
-
-lesson: don't try to combine -> substract
-
-
-InitVect necessary anymore since we can get the InitVect effect using HandlerListM with injectivivity
+The code runList and runListL are practically the same. This code duplication
+is acceptable since the code required to abstract over these two instances
+will be more. If in the future a bug is found in either one of the two this
+generalization should be considered.
 
 \begin{code}
+-- | Given a list that contains effect handlers such that when those are
+--   ran only the last effect remains.
+runListL :: HVect (HandlerListL effs) -> Eff effs a -> Eff (LastVect effs) a
+runListL HNil fect = unsafeCoerce fect
+runListL (r :&: rs) fect = unsafeCoerce (runListL (unsafeCoerce rs) (runHandler r' fect'))
+  where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
+        r' = (unsafeCoerce r) :: Handler eff' effs'
+
+-- | Monadic variant of 'runHandlers'
+runHandlersM :: (LastVect effs ~ '[m], Monad m) => HVect (HandlerListL effs) -> Eff effs a -> m a
+runHandlersM hl eff = runM (runListL hl eff)
+\end{code}
+
+TODO: lesson: don't try to combine -> substract
+
+The following type families are not required since there are more specialized type families that have overlap with them.
+The reason they are still included is because they have been useful during the exploratory phase when coming
+up with specialized type families.
+\begin{code}
+type family AppendVect xs ys where
+  AppendVect '[] bs = bs
+  AppendVect (a ': as) bs = a ': (AppendVect as bs)
+
 type family InitVect xs :: [k] where
    InitVect '[x] = '[]
    InitVect (t ': ts) = t ': (InitVect ts)
 
+type family LTE n m where
+  LTE Zero Zero = 'True
+  LTE Zero (Succ Zero) = 'True
+  LTE n Zero = 'False
+  LTE (Succ n) (Succ m) = LTE n m
+\end{code}
+
+At first glance LastVect seem to perform the same operation as LastMember from freer-simple.
+This is not the case, Last Member is only a type level computation using empty class/instances.
+We sometimes need the last element of a list for type checking even though we do not care which
+element this is (runListL). LastMember is about forcing the last member of a list.
+\begin{code}
 type family LastVect xs :: [k] where
    LastVect '[x] = '[x]
    LastVect (t ': ts) = LastVect ts
 \end{code}
 
-LastVect might be replacible by LastMember, but it is not a drop in replacement, and seems to need (unsafe) coercing that
-is more cumbersome that the (LastVect effs ~ '[m]) coercing we do now.
--> Not the case, LastMember is only a type level computation using class/instances. It has no result
-
+This is a verbatim copy of the SNatRep inside HVect, but the library author sadly did not export it.
 \begin{code}
-runHandlerM :: (LastVect effs ~ '[m], Monad m) => HVect (HandlerListM effs) -> Eff effs a -> m a
-runHandlerM hl eff = runM (runListL hl eff)
+class SNatRep n where
+    getSNat :: SNat n
 
-runListL :: HVect (HandlerListM effs) -> Eff effs a -> Eff (LastVect effs) a
-runListL HNil fect = unsafeCoerce fect
-runListL (r :&: rs) fect = unsafeCoerce (runListL (unsafeCoerce rs) (runHandler r' fect'))
-  where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
-        r' = (unsafeCoerce r) :: Handler eff' effs'
+instance SNatRep 'Zero where
+    getSNat = SZero
+
+instance SNatRep n => SNatRep ('Succ n) where
+    getSNat = SSucc getSNat
 \end{code}
-This runListSafe doesn't work since we cant signal to the compiler that hwne HNil that its type is HVect  '[]
 
-runListSafe :: forall effs a. HVect (HandlerList effs a) -> Eff effs a -> Eff '[] a
-runListSafe vec fect = case vec of
-                         g@HNil -> _
-                         (r :&: rs) -> _
-
-
-Een run partial zoals hieronder werkt niet doordat we geen injective type families hebben die ook met LHS kunnen werken
-injectivity of type C zoals omschreven op GHC trac.
-runListPartial :: forall effs effs2 a . HVect (HandlerList effs a)  -> Eff (Append effs effs2) a -> Eff effs2 a
-runListPartial = _
-
-Mogelijk alternative zou kunnen zijn gebruik maken van "split" Split effs eff2 ceff
-Waar effs ++ effs2 = ceff
-
-runListPartial :: Split effs effs ceff -> HVect (HandlerList effs a)  -> Eff (Append effs effs2) a -> Eff effs2 a
-
+runList testcode
 \begin{code}
 test1 :: Eff '[FS.State Int] Int
 test1 =  FS.get
@@ -199,13 +232,6 @@ test = do n <- FS.get @Int
 testRun :: Int
 testRun = run (FS.evalState 3 (FR.runReader 5 test))
 
-\end{code}
-testRun2 :: Int
-testRun2 = run $ runHeadList rsl _
-  where rsl = (FR.runReader 5) :&: sl
-        sl = (FS.evalState 3) :&: Nil
-
-\begin{code}
 test1Run3 :: Int
 test1Run3 = run (runList ((Handler (FS.evalState 3)) :&: HNil) test1)
 
@@ -216,26 +242,7 @@ testRun3 :: Int
 testRun3 = run (runList (Handler (FR.runReader 5) :&: Handler (FS.evalState 3) :&: HNil) test)
 \end{code}
 
-Make handlerlist be non-empty such that it can be injective.
-This is used to be able to work with SubLists.
-\begin{code}
-type family HandlerList effs = result | result -> effs where
-  HandlerList '[] = '[]
-  HandlerList (eff ': effs) = (Handler eff effs) ': HandlerList effs
-\end{code}
-
-We instroduce an extra list for handlers such that we get one entry less, but that this last
-entry is still recorded in the effects lists. That is why Handerlist in combination with InitVect didn't work
-\begin{code}
-type family HandlerListM effs = result | result -> effs where
-  HandlerListM '[eff, m] = '[Handler eff '[m]]
-  HandlerListM (eff ': effs) = (Handler eff effs) ': HandlerListM effs
-\end{code}
-
-HVectElim looks interesting just do not know how to apply it
-
-Toch een data family nodig?
-
+The console code is a slightly more eleborate test. The code is taken from the freer-simple documentation.
 \begin{code}
 data Console r where
   PutStrLn    :: String -> Console ()
@@ -273,17 +280,16 @@ testIORun = runConsole testIO
 The following is a nice test to check if adding constrains also works
 \begin{code}
 testIORun2 :: IO ()
-testIORun2 = runHandlerM (Handler runConsole' :&: HNil) testIO
+testIORun2 = runHandlersM (Handler runConsole' :&: HNil) testIO
 \end{code}
 
-Having a type family flatten might drop the need for having to split interpreters. Is het echter voldoende om te weten
-dat wanneer alles heeft gedraait alles weg is? Lijkt me wel voldoende, maar moet wel even oppassen.
-HandlerList type family hoeft niet worden aangepast. Er moet alleen een flatten worden uitgevoerd of de eff lijst.
-
-Encode the encoding also in the sublistrep?
-Try somethign like SNatRep
-
+We want to be able that we can reduce the required effects. To be able to determine whether
+the parent procedure has these handlers and to make this subset selection automatically from
+the perspective of the library user we need SubList.
+The dataype encodes the proof and SubListRep gives us a method the extract this encoding.
 \begin{code}
+-- | Datatype to encode in what way xs is a sublist of ys.
+-- Note that this is about sublist and not prefix or subsequences.
 data SubList (xs :: k) (ys :: k) where
   Base :: SubList '[] '[]
   Keep :: SubList xs ys -> SubList (x ': xs) (x ': ys)
@@ -303,67 +309,29 @@ instance {-# OVERLAPPABLE #-} SubListRep xs ys =>  SubListRep xs (y ': ys) where
 \end{code}
 
 \begin{code}
+-- | Extract the sublist given the larger list with explicit evidence passing.
 extractHVect' :: SubList xs ys -> HVect ys -> HVect xs
 extractHVect' Base r = HNil
 extractHVect' (Keep sl) (r :&: rs) = r :&: (extractHVect' sl rs)
 extractHVect' (Drop sl) (r :&: rs) = extractHVect' sl rs
 
+-- | Extract the sublist given the larger list with implicit evidence passing.
 extractHVect :: (SubListRep xs ys) => HVect ys -> HVect xs
 extractHVect = extractHVect' (getSubList)
 \end{code}
 
-Gaat alleemaal niet niet meer doordat we extractHVect hebben gemaakt i.p.v. extractHandler
-TODO: refactor de unsafeCoerce handler
-
-Mooier zou wellicht zijn SubList s r i.p.v. onderstaande, op deze manier zijn er wel minder unsafeCoerce nodig
-Anders zou de Base en Keep situatie nog een extra unsafeCoerce nodig hebben.
-
-Voeg constraint equality toe. Op die manier moet het volgens mij lukken om de sublist eis die er nu is voor extractHandler' om te zetten naar (SubList s r)
-
-De definitie van SubList gegeven zoals hierboven is niet informatierijk genoeg dat  de compiler kan achterhalen
-wat de 'eff' en 'effs' moet zijn voor een (Handler eff effs). Onderstaande sublist gebruiken vereist weer typeintype wat ik niet wil doen.
-
-data SubListHL (xs :: HandlerList effs a) (ys :: HandlerList effs2 a) where
-  Base :: SubListHL '[] '[]
-  Keep :: SubListHL xs ys -> SubListHL ((Handler eff effs a) ': HandlerList effs)  ((Handler eff effs2 a) ': HandlerList effs2 a)
-  Drop :: SubListHL xs ys -> SubListHL (HandlerList effs a)  ((Handler eff effs2 a) ': HandlerList effs2 a)
-
-Can't drop the a unless we find a way to drop it in Handerlist a
+This is a specialized version of extractHVect' since GHC type inference is good enough.
+To overcome this limitation we need to wrap clauses with unsafeCoerce.
 \begin{code}
-
+-- | Specialized version of 'extractHVect' for 'Handerlist'
 extractHandler :: SubList (HandlerList s) (HandlerList r) -> HVect (HandlerList r) -> HVect (HandlerList s)
 extractHandler Base r = HNil
 extractHandler (Keep sl) (r :&: rs) = r :&: unsafeCoerce (extractHandler (unsafeCoerce sl) (unsafeCoerce rs))
 extractHandler (Drop sl) (r :&: rs) = unsafeCoerce (extractHandler (unsafeCoerce sl) (unsafeCoerce rs))
+\end{code}
 
-
-class SNatRep n where
-    getSNat :: SNat n
-
-instance SNatRep 'Zero where
-    getSNat = SZero
-
-instance SNatRep n => SNatRep ('Succ n) where
-    getSNat = SSucc getSNat
-
---extractHandlersC ::
---  (SNatRep n,
---   ss ~ HandlerList s,
---   rs ~ HandlerList r,
---   tss ~ TakeVect n (HandlerList s),
---   dss ~ DropVect n (HandlerList s),
---   AppendVect tss dss ~ ss,
---   LenVect tss ~ n,
---   SubListRep ss rs) =>
---  HVect rs -> (HVect tss, HVect dss)
---extractHandlersC ss = splitVectB getSNat (extractHandler ss)
-
-type family LTE n m where
-  LTE Zero Zero = 'True
-  LTE Zero (Succ Zero) = 'True
-  LTE n Zero = 'False
-  LTE (Succ n) (Succ m) = LTE n m
-
+\begin{code}
+-- | 'extractHandlers' extracts the sublist and splits this list at position 'n'.
 extractHandlers :: forall n s r m ss dss tss rs.
   (ss ~ HandlerList s,
    rs ~ HandlerList r,
@@ -371,62 +339,43 @@ extractHandlers :: forall n s r m ss dss tss rs.
    dss ~ DropVect n ss,
    LenVect ss ~ m) =>
   SNat n -> SubList ss rs -> HVect rs -> (HVect tss, HVect dss)
-extractHandlers n sl rs = splitVectB n ss
+
+extractHandlers n sl rs = splitVect n ss
   where ss :: HVect ss
         ss = extractHandler sl rs
+\end{code}
 
---extractHandlersM ::
---  (SNatRep n,
---   ss ~ HandlerList s,
---   rs ~ HandlerList r,
---   tss ~ TakeVect n ss,
---   dss ~ DropVect n ss,
---   AppendVect tss dss ~ ss,
---   LenVect tss ~ n,
---   LenVect ss ~ m,
---   LTE n m ~ 'True,
---   SubListRep ss rs) =>
---  SNat n -> SubList ss rs -> HVect rs -> (HVect tss, HVect dss)
---extractHandlersM n sl ss = splitVectB n (extractHandler ss)
-
-type family AppendVect xs ys where
-  AppendVect '[] bs = bs
-  AppendVect (a ': as) bs = a ': (AppendVect as bs)
-
+\begin{code}
 type family LenVect xs where
   LenVect '[] = Zero
   LenVect (t ': ts) = Succ (LenVect ts)
-
 \end{code}
 
 Lesson: keep your steps as simple as possible. That way you might be able to use types without coercing
 Lesson: You don't have to coerce if a type synonym suffices.
 Lesson: Also allowed me to drop the polykinds extention
+Lesson: there is such a thing as to much constraints. Both because they are harder to solve, and might lead
+to weird infinite types.
 
-\begin{code}
+==========================================
+Process specific code
+==========================================
 
-\end{code}
-
+In the future we might want to support more than just distributed-process, therefore we introduce a type synonym.
 \begin{code}
 type PID = DP.ProcessId
 \end{code}
-
-En het bevat de argument waar je mee wilt werken. Het enige dat het nog mist is de effect
-
-TODO add lift IO
-
-For now we assume that Proc inside proc is not allowed.
-
-Use the transitivity property of sublist
 
 \begin{code}
 data Proc (r :: [* -> *]) a where
   Spawn ::  (fs ~ FlattenProc s, ss ~ TillProc s, n ~ LenVect ss) => SNat n -> SubList fs r -> Eff s () -> Proc r PID
   Call ::  (fs ~ FlattenProc s, ss ~ TillProc s, n ~ LenVect ss) => SNat n -> SubList fs r -> Eff s a -> Proc r a
-  LiftIO :: IO a -> Proc r a
   Send  :: DS.Serializable a => PID -> a ->  Proc r ()
   Expect :: DS.Serializable a => Proc r a
+  LiftIO :: IO a -> Proc r a
+  Say :: String -> Proc r ()
 \end{code}
+
 Since we now have subset proof those are probably cheaper to pass. But lets first keep it at run instances.
 -> Not going to work due to needing it when spawning
 
@@ -436,21 +385,25 @@ The thing is that we can give it an identity function or some lifter such that i
 Probably better with reintepret? Than we can move Proc r as the last handler. Might make stuff easier.
 \begin{code}
 runProc :: HVect (HandlerList r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
-runProc hl effs = translate (\case
-                                Spawn n sl eff -> proHandler (DP.spawnLocal . void) n (convertSublist sl) hl eff
-                                Call n sl eff -> proHandler DP.callLocal n (convertSublist sl) hl eff
-                                LiftIO io -> liftIO io
-                                Send pid id -> DP.send pid id
-                                Expect -> DP.expect) effs
+runProc hl effs = translate (procCases hl) effs
+
+procCases :: HVect (HandlerList r) -> Proc r a -> DP.Process a
+procCases hl (Spawn n sl eff) = procHandler (DP.spawnLocal . void) n (convertSublist sl) hl eff
+procCases hl (Call n sl eff) = procHandler DP.callLocal n (convertSublist sl) hl eff
+procCases _ (LiftIO io) = liftIO io
+procCases _ (Send pid id) = DP.send pid id
+procCases _ Expect = DP.expect
+procCases _ (Say str) = DP.say str
 
 \end{code}
 
-The sublist encoding of s and r or the sublist of a function list on s and r are the same.
+The sublist encoding of s and r, and the sublist of a function list on s and r are the same.
 Therefore we can convert one in the other.
 \begin{code}
 convertSublist :: SubList s r -> SubList (HandlerList s) (HandlerList r)
 convertSublist = unsafeCoerce
 \end{code}
+Lesson: unsafeCoerce is love, unsafeCoerce is life.
 
 The freer-simple library has support for sending to arbitrary member or the last member when that member is a monad.
 We need to be able to send to the last member, but don't require that the last member is a monad.
@@ -459,6 +412,10 @@ sendL :: (LastMember l effs) => l a -> Eff effs a
 sendL = send
 \end{code}
 
+Lesson: sometimes specialized is a bad thing since the compiler cannot inference. Other times specialization
+is the only way to really enforce something. Practically of this advice -> 0.
+
+These two type families allows use to be polymorphic in the kind of effects we except to spawn and call.
 \begin{code}
 type family TillProc xs where
   TillProc '[Proc ks] = '[]
@@ -469,8 +426,13 @@ type family GetProcContent xs where
   GetProcContent '[Proc ks] = ks
   GetProcContent '[] = '[]
   GetProcContent (x ': xs) = GetProcContent xs
+\end{code}
 
+Lesson: *Rep classes are useful but do not include them when you explicitely give
+the result as parameter. Because then you still need to be able to satisfy the *Rep
+constraint eventhough you already have the proof.
 
+\begin{code}
 call :: (
   SNatRep n,
   ss ~ (TillProc s),
@@ -492,20 +454,29 @@ spawn :: (
      => Eff s () -> Eff effs PID
 spawn eff = sendL (Spawn getSNat getSubList eff)
 
-proHandler :: forall a b fs ss hr fhs n s ks r. (
+\end{code}
+
+The unsafeCoerce are used here for two reasons.
+- One to be able to use the splitted the handlerlist like they are supposed to.
+- To lift an effect that doesn't contain a Proc to still go through the handler.
+This way we do not have to do a runtime check of some type level trickery.
+\begin{code}
+procHandler :: forall a b fs ss hr fhs n s ks r. (
    fs ~ FlattenProc s,
    ss ~ TillProc s,
    hr ~ HandlerList r,
    fhs ~ HandlerList fs,
    ks ~ GetProcContent s) =>
    (DP.Process a -> DP.Process b) -> SNat n -> SubList fhs hr -> HVect hr -> Eff s a -> DP.Process b
-proHandler f n sl hl eff = f (runM $ runProc ks' (unsafeCoerce (runListL ss' eff)))
+procHandler f n sl hl eff = f (runM $ runProc ks' (unsafeCoerce (runListL ss' eff)))
   where (ss, ks) = extractHandlers n sl hl
-        ss' :: HVect (HandlerListM s)
+        ss' :: HVect (HandlerListL s)
         ss' =  unsafeCoerce ss
         ks' :: HVect (HandlerList ks)
         ks' =  unsafeCoerce ks
+\end{code}
 
+\begin{code}
 testProcIO :: IO ()
 testProcIO = do
     backend <- initializeBackend "127.0.0.1" "8230" Node.initRemoteTable
@@ -531,12 +502,6 @@ testProc2 = runM (runProc handlers prog)
     prog = spawn j
 \end{code}
 
-Probably need to rewrite the GADT slightly to make subproc operations easier
-Looks like the sublist proof could still just work rather than passing Handerlist explicit
--> Ask could probably not be completely list since we need to make sub procs.
-
-Do something with rebindable do to keep the syntax minimalistic.
-
 Subtype, zal ook weer iets van sublist worden.
 
 Tests for the cases we want to support with proc
@@ -554,9 +519,11 @@ gh = FR.ask
 
 \end{code}
 
-Currently function that what to use IO functionality need to be explicitely augmented with Proc '[].
+Currently function that what to use IO functionality need to be explicitely augmented with Proc '[], and have special functions
+for those handlers to do the lifting.
 This could be fixed by introducing an spawnIO/callIO functions or by going through the Union (The effs) which takes the content of the last entry
-and puts a DP.liftIO before it.
+and puts a DP.liftIO before it. Maybe even generalizing it, by having a spawn function which you pass how it should reintepret it. A reintepret last.
+This would require writing a replaceRelay function specialized to LastMember.
 
 liftIO :: (LastMember IO s, ss ~ InitVect effs, r ~ AppendVect '[Proc '[]]) => Eff s a -> Eff r a
 
@@ -578,8 +545,8 @@ Misschien is type application ook wel te gebruiken?
 Je kunt alleen maar substractive synthesis niet additive synthesis.
 Dus als je iets echt wilt moet het of vooraan, of achteraan staan.
 als nog kun je met commando's wel zeggen dat proc niet perse achteraan hoeft te staan?
-\begin{code}
 
+\begin{code}
 sendIO :: (LastMember (Proc r) effs) => IO a -> Eff effs a
 sendIO = sendL . LiftIO
 
@@ -610,6 +577,8 @@ j = do i <- call hh
        sendIO $ putStrLn (s ++ show i)
 \end{code}
 
+lesson: by making proc the last entry the concattination becomes simple
+enough for the compiler to work with it.
 \begin{code}
 type family FlattenProc xs where
   FlattenProc '[Proc r] = r
@@ -658,8 +627,8 @@ Here we use strict take and drops, since that is what we need and it helps with 
 type family SplitAtVect n xs where
   SplitAtVect n xs = (HVect (TakeVect n xs), HVect (DropVect n xs))
 
-splitVect :: SNat n -> HVect xs -> SplitAtVect n xs
-splitVect n xs = (takeVect n xs, dropVect n xs)
+splitVect' :: SNat n -> HVect xs -> SplitAtVect n xs
+splitVect' n xs = (takeVect n xs, dropVect n xs)
 
 type family TakeVect n xs where
   TakeVect Zero xs = '[]
@@ -680,11 +649,27 @@ dropVect :: SNat n -> HVect xs -> HVect (DropVect n xs)
 dropVect SZero xs = xs
 dropVect (SSucc m) (r :&: rs) = dropVect m rs
 
-
-splitVectB :: (DropVect n ss ~ ks, TakeVect n ss ~ ss') => SNat n -> HVect ss -> (HVect ss', HVect ks)
-splitVectB n xs = splitVect n xs
+splitVect :: (DropVect n ss ~ ks, TakeVect n ss ~ ss') => SNat n -> HVect ss -> (HVect ss', HVect ks)
+splitVect n xs = splitVect' n xs
 \end{code}
 
-Voeg type family toe voor partial application
+lesson: reusability is low, very low. We have need to define things that have be done a thousand times
+before just because we want to use it with kind polymorphism,
+or because we can't lift them into singletons.
 
-type family HandlerListPartial effs effs2 where
+lesson: How I learned to stop worrying and love unsafeCoerce.
+With the current state of Haskell type level machinery I think the best way might be
+to write type families, try to get it as tight as possible, but when you are working
+with functions which are 'trivially' true, just unsafeCoerce it.
+An other possibility is to use empty type classes. Haven't explored that fully. Probably some proofs
+could have be easier and more safely been derived using them.
+
+lesson: Type level trickery is great tool for procrastinators. Being busy with
+something related to the thing you are supposed to do, but not making any progress.
+
+lesson: Dependent types: are you depending on types or are you a dependent type.
+
+SHOW: tillProc and getProcContent is a nice example of how I've been able to create polymorphic function which have different requirements.
+
+lesson: are beautiful holes
+lesson: when working with constraints just write to fucntion and copy the type signature, and refine it bit by bit.
