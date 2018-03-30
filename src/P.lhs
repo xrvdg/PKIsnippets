@@ -54,6 +54,8 @@ import Data.HVect as HV
 import Data.OpenUnion ((:++:))
 import qualified Control.Distributed.Process as DP
 import qualified Control.Distributed.Process.Serializable as DS
+import qualified Control.Distributed.Process.Node as Node
+import Control.Distributed.Process.Backend.SimpleLocalnet (initializeBackend, newLocalNode)
 import Data.Proxy
 import Unsafe.Coerce
 import Data.Coerce
@@ -437,7 +439,7 @@ convertSublist :: SubList s r -> SubList (HandlerList s) (HandlerList r)
 convertSublist = unsafeCoerce
 
 sendL :: (LastMember l effs) => l a -> Eff effs a
-sendL = undefined
+sendL = send
 
 spawnProc :: (
   SNatRep n,
@@ -464,10 +466,17 @@ proHandler f n sl hl eff = f (runM $ runProc ks' (runListL ss' eff))
         ks' :: HVect (HandlerList ks)
         ks' =  unsafeCoerce ks
 
+testProcIO :: IO ()
+testProcIO = do
+    backend <- initializeBackend "127.0.0.1" "8230" Node.initRemoteTable
+    node <- newLocalNode backend
+    Node.runProcess node (void testProc)
+
 testProc :: DP.Process PID
 testProc = runM (runProc handlers prog)
   where
-    handlers = (FR.runReader "Hello" :&: FR.runReader (5 :: Int) :&: HNil)
+    handlers :: HVect (HandlerList '[FR.Reader String, FR.Reader Int])
+    handlers = (Handler (FR.runReader "Hello") :&: Handler (FR.runReader (5 :: Int)) :&: HNil)
     prog :: Eff '[Proc '[FR.Reader String, FR.Reader Int]] PID
     prog = (spawnProc f)
 \end{code}
