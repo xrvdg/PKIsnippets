@@ -38,6 +38,9 @@ For SubListRep
 \begin{code}
 {-# language UndecidableInstances #-}
 \end{code}
+\begin{code}
+{-# language ScopedTypeVariables #-}
+\end{code}
 
 \begin{code}
 module P (testRun) where
@@ -140,11 +143,11 @@ is more cumbersome that the (LastVect effs ~ '[m]) coercing we do now.
 
 \begin{code}
 runHandlerM :: (LastVect effs ~ '[m], Monad m) => HVect (HandlerListM effs) -> Eff effs a -> m a
-runHandlerM hl eff = runM (runListM hl eff)
+runHandlerM hl eff = runM (runListL hl eff)
 
-runListM :: HVect (HandlerListM effs) -> Eff effs a -> Eff (LastVect effs) a
-runListM HNil fect = unsafeCoerce fect
-runListM (r :&: rs) fect = unsafeCoerce (runListM (unsafeCoerce rs) (runHandler r' fect'))
+runListL :: HVect (HandlerListM effs) -> Eff effs a -> Eff (LastVect effs) a
+runListL HNil fect = unsafeCoerce fect
+runListL (r :&: rs) fect = unsafeCoerce (runListL (unsafeCoerce rs) (runHandler r' fect'))
   where fect' = (unsafeCoerce fect) :: Eff (eff' ': effs') a
         r' = (unsafeCoerce r) :: Handler eff' effs'
 \end{code}
@@ -274,7 +277,6 @@ data SubList (xs :: k) (ys :: k) where
   Keep :: SubList xs ys -> SubList (x ': xs) (x ': ys)
   Drop :: SubList xs ys -> SubList xs (y ': ys)
 
-
 class SubListRep xs ys where
   getSubList :: SubList xs ys
 
@@ -330,17 +332,49 @@ instance SNatRep 'Zero where
 instance SNatRep n => SNatRep ('Succ n) where
     getSNat = SSucc getSNat
 
-extractHandlers ::
-  (SNatRep n,
-   ss ~ HandlerList s,
+--extractHandlersC ::
+--  (SNatRep n,
+--   ss ~ HandlerList s,
+--   rs ~ HandlerList r,
+--   tss ~ TakeVect n (HandlerList s),
+--   dss ~ DropVect n (HandlerList s),
+--   AppendVect tss dss ~ ss,
+--   LenVect tss ~ n,
+--   SubListRep ss rs) =>
+--  HVect rs -> (HVect tss, HVect dss)
+--extractHandlersC ss = splitVectB getSNat (extractHandler ss)
+
+type family LTE n m where
+  LTE Zero Zero = 'True
+  LTE Zero (Succ Zero) = 'True
+  LTE n Zero = 'False
+  LTE (Succ n) (Succ m) = LTE n m
+
+extractHandlers :: forall n s r m ss dss tss rs.
+  (ss ~ HandlerList s,
    rs ~ HandlerList r,
-   tss ~ TakeVect n (HandlerList s),
-   dss ~ DropVect n (HandlerList s),
-   AppendVect tss dss ~ ss,
-   LenVect tss ~ n,
-   SubListRep ss rs) =>
-  HVect rs -> (HVect tss, HVect dss)
-extractHandlers ss = splitVectB getSNat (extractHandler ss)
+   tss ~ TakeVect n ss,
+   dss ~ DropVect n ss,
+   LenVect ss ~ m,
+   SubListL s r) =>
+  SNat n -> SubList ss rs -> HVect rs -> (HVect tss, HVect dss)
+extractHandlers n sl rs = splitVectB n ss
+  where ss :: HVect ss
+        ss = extractHandler rs
+
+--extractHandlersM ::
+--  (SNatRep n,
+--   ss ~ HandlerList s,
+--   rs ~ HandlerList r,
+--   tss ~ TakeVect n ss,
+--   dss ~ DropVect n ss,
+--   AppendVect tss dss ~ ss,
+--   LenVect tss ~ n,
+--   LenVect ss ~ m,
+--   LTE n m ~ 'True,
+--   SubListRep ss rs) =>
+--  SNat n -> SubList ss rs -> HVect rs -> (HVect tss, HVect dss)
+--extractHandlersM n sl ss = splitVectB n (extractHandler ss)
 
 type family AppendVect xs ys where
   AppendVect '[] bs = bs
@@ -374,7 +408,7 @@ Use the transitivity property of sublist
 
 \begin{code}
 data Proc (r :: [* -> *]) a where
-  Spawn ::  (LastVect s ~ '[Proc k], SubListRep (FlattenProc s) r) => Proxy (InitVect s) -> Proxy k -> Eff s () -> Proc r PID
+  Spawn ::  (fs ~ AppendVect ss k, ss ~ InitVect s, ss ~ TakeVect n fs, k ~ DropVect n fs, LastVect s ~ '[Proc k], SubListRep fs r) => SNat n -> SubList fs r -> Eff s () -> Proc r PID
   Call ::   (LastVect r' ~ '[Proc k]) => HVect (HandlerListM r') -> Eff r' a -> Proc r a
   Send  :: DS.Serializable a => PID -> a ->  Proc r ()
   Expect :: DS.Serializable a => Proc r a
@@ -389,10 +423,26 @@ Probably better with reintepret? Than we can move Proc r as the last handler. Mi
 \begin{code}
 runProc :: HVect (HandlerList r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
 runProc hl effs = translate (\case
-                                Spawn ps pk eff -> let (ss, ks) = extractHandlers hl in DP.spawnLocal (runM $ runProc ks _)
+                                Spawn n sl eff -> undefined -- spawnHandler n (unsafeCoerce sl) hl eff
  --                               Call sl eff -> DP.callLocal (runM runProc $ runHandlerM sl eff)
                                 Send pid id -> DP.send pid id
                                 Expect -> DP.expect) effs
+
+spawnHandler ::  (
+   ss ~ HandlerList s,
+   rs ~ HandlerList r,
+   tss ~ TakeVect n ss,
+   dss ~ DropVect n ss,
+   LenVect ss ~ m,
+   SubListRep ss rs,
+   LastVect s ~ '[Proc k]) =>
+   SNat n -> SubList ss rs -> HVect rs -> Eff s () -> DP.Process PID
+spawnHandler n sl hl eff = DP.spawnLocal (runM $ runProc ks' (runListL ss' eff))
+  where (ss, ks) = extractHandlers n sl hl
+        ss' :: HVect (HandlerListM effs)
+        ss' = unsafeCoerce ss
+        ks' :: HVect (HandlerList k)
+        ks' =  unsafeCoerce (ks)
 \end{code}
 
 Probably need to rewrite the GADT slightly to make subproc operations easier
@@ -529,6 +579,9 @@ type family DropVect n xs where
   DropVect Zero xs = xs
   DropVect (Succ m) (x ': xs) = DropVect m xs
 
+type family SplitVect n xs where
+  SplitVect n xs = '(TakeVect n xs, DropVect n xs)
+
 takeVect :: SNat n -> HVect xs -> HVect (TakeVect n xs)
 takeVect SZero xs = HNil
 takeVect (SSucc m) (r :&: rs) = r :&: (takeVect m rs)
@@ -540,7 +593,7 @@ dropVect (SSucc m) (r :&: rs) = dropVect m rs
 splitVect :: SNat n -> HVect xs -> SplitAtVect n xs
 splitVect n xs = (takeVect n xs, dropVect n xs)
 
-splitVectB :: (LenVect ss' ~ n, ss ~ AppendVect ss' ks, DropVect n ss ~ ks, TakeVect n ss ~ ss') => SNat n -> HVect ss -> (HVect ss', HVect ks)
+splitVectB :: (DropVect n ss ~ ks, TakeVect n ss ~ ss') => SNat n -> HVect ss -> (HVect ss', HVect ks)
 splitVectB n xs = splitVect n xs
 \end{code}
 
