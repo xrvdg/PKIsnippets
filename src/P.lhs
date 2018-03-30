@@ -414,7 +414,7 @@ Use the transitivity property of sublist
 \begin{code}
 data Proc (r :: [* -> *]) a where
   Spawn ::  (fs ~ AppendVect ss ks, ss ~ InitVect s, n ~ LenVect ss, LastVect s ~ '[Proc ks]) => SNat n -> SubList fs r -> Eff s () -> Proc r PID
-  --Call ::   (LastVect r' ~ '[Proc k]) => HVect (HandlerListM r') -> Eff r' a -> Proc r a
+  Call ::  (fs ~ AppendVect ss ks, ss ~ InitVect s, n ~ LenVect ss, LastVect s ~ '[Proc ks]) => SNat n -> SubList fs r -> Eff s a -> Proc r a
   LiftIO :: IO a -> Proc r a
   Send  :: DS.Serializable a => PID -> a ->  Proc r ()
   Expect :: DS.Serializable a => Proc r a
@@ -430,7 +430,7 @@ Probably better with reintepret? Than we can move Proc r as the last handler. Mi
 runProc :: HVect (HandlerList r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
 runProc hl effs = translate (\case
                                 Spawn n sl eff -> proHandler (DP.spawnLocal . void) n (convertSublist sl) hl eff
----                               Call sl eff -> DP.callLocal (runM runProc $ runHandlerM sl eff)
+                                Call n sl eff -> proHandler DP.callLocal n (convertSublist sl) hl eff
                                 LiftIO io -> liftIO io
                                 Send pid id -> DP.send pid id
                                 Expect -> DP.expect) effs
@@ -440,6 +440,24 @@ convertSublist = unsafeCoerce
 
 sendL :: (LastMember l effs) => l a -> Eff effs a
 sendL = send
+
+liftProc :: Eff effs a -> Eff (effs :++: '[Proc '[]]) a
+liftProc = unsafeCoerce
+
+call = callProc . liftProc
+
+callProc :: (
+  SNatRep n,
+  ss ~ (InitVect s),
+  n ~ LenVect ss,
+  LastVect s ~ '[Proc ks],
+  LastMember (Proc r) effs,
+  fhs ~ AppendVect ss ks,
+  SubListRep fhs r)
+     => Eff s a -> Eff effs a
+callProc eff = sendL (Call getSNat getSubList eff)
+
+spawn = spawnProc . liftProc
 
 spawnProc :: (
   SNatRep n,
@@ -452,13 +470,13 @@ spawnProc :: (
      => Eff s () -> Eff effs PID
 spawnProc eff = sendL (Spawn getSNat getSubList eff)
 
-proHandler :: forall b fs ss hr fhs n s ks r. (
+proHandler :: forall a b fs ss hr fhs n s ks r. (
    fs ~ AppendVect ss ks,
    ss ~ InitVect s,
    hr ~ HandlerList r,
    fhs ~ HandlerList fs,
    LastVect s ~ '[Proc ks]) =>
-   (forall a . DP.Process a -> DP.Process b) -> SNat n -> SubList fhs hr -> HVect hr -> Eff s () -> DP.Process b
+   (DP.Process a -> DP.Process b) -> SNat n -> SubList fhs hr -> HVect hr -> Eff s a -> DP.Process b
 proHandler f n sl hl eff = f (runM $ runProc ks' (runListL ss' eff))
   where (ss, ks) = extractHandlers n sl hl
         ss' :: HVect (HandlerListM s)
@@ -472,11 +490,23 @@ testProcIO = do
     node <- newLocalNode backend
     Node.runProcess node (void testProc)
 
+testProcIO2 :: IO ()
+testProcIO2 = do
+    backend <- initializeBackend "127.0.0.1" "8231" Node.initRemoteTable
+    node <- newLocalNode backend
+    Node.runProcess node (void testProc)
+
 testProc :: DP.Process PID
 testProc = runM (runProc handlers prog)
   where
     handlers = (Handler (FR.runReader "Hello") :&: Handler (FR.runReader (5 :: Int)) :&: HNil)
     prog = (spawnProc f)
+
+testProc2 :: DP.Process PID
+testProc2 = runM (runProc handlers prog)
+  where
+    handlers = (Handler (FR.runReader "Hello") :&: Handler (FR.runReader (5 :: Int)) :&: HNil)
+    prog = (spawnProc j)
 \end{code}
 
 Probably need to rewrite the GADT slightly to make subproc operations easier
@@ -492,17 +522,9 @@ Tests for the cases we want to support with proc
 Maybe we can drop the proxy with something else, or wrap it in some kind of gadt
 
 Adding a flatten for s will probably suffice
-\begin{code}
-
-call :: (SubListRep (FlattenProc s) (FlattenProc r), LastMember (Proc r) effs) => Eff s a -> Eff effs a
-call eff = undefined
-
-callProc :: (SubListRep (FlattenProc s) (FlattenProc r), (SubListRep (FlattenProc k) (FlattenProc r)), LastMember (Proc k) s, LastMember (Proc r) effs) => Eff s a -> Eff effs a
-callProc eff = undefined
-\end{code}
 
 \begin{code}
-hh :: Eff '[FR.Reader Int] Int
+hh :: Eff '[FR.Reader Int, Proc '[]] Int
 hh = FR.ask
 
 gh :: Eff '[FR.Reader String, Proc '[]] String
@@ -531,12 +553,12 @@ sendIO :: (LastMember (Proc r) effs) => IO a -> Eff effs a
 sendIO = sendL . LiftIO
 
 g :: Eff '[FR.Reader Int, Proc '[FR.Reader String]] ()
-g = do s <- call gh
+g = do s <- callProc gh
        i <- FR.ask @Int
        sendIO $ putStrLn (s ++ show i)
 
 h :: Eff '[FR.Reader String, Proc '[FR.Reader Int]] ()
-h = do i <- call hh
+h = do i <- callProc hh
        s <- FR.ask @String
        sendIO $ putStrLn (s ++ show i)
 
@@ -552,8 +574,8 @@ i = do i <- call hh
 
 \begin{code}
 j :: Eff '[Proc '[FR.Reader String, FR.Reader Int]] ()
-j = do i <- call hh
-       s <- call gh
+j = do i <- callProc hh
+       s <- callProc gh
        sendIO $ putStrLn (s ++ show i)
 \end{code}
 
