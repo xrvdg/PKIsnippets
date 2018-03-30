@@ -475,9 +475,7 @@ testProcIO = do
 testProc :: DP.Process PID
 testProc = runM (runProc handlers prog)
   where
-    handlers :: HVect (HandlerList '[FR.Reader String, FR.Reader Int])
     handlers = (Handler (FR.runReader "Hello") :&: Handler (FR.runReader (5 :: Int)) :&: HNil)
-    prog :: Eff '[Proc '[FR.Reader String, FR.Reader Int]] PID
     prog = (spawnProc f)
 \end{code}
 
