@@ -45,6 +45,7 @@ For SubListRep
 \begin{code}
 module P (testRun) where
 import Control.Monad.Freer
+import Control.Monad
 import qualified Control.Monad.Freer.Internal as FI
 import qualified Control.Monad.Freer.Reader as FR
 import qualified Control.Monad.Freer.State as FS
@@ -320,8 +321,11 @@ Can't drop the a unless we find a way to drop it in Handerlist a
 \begin{code}
 type SubListL s r = (SubListRep (HandlerList s) (HandlerList r))
 
-extractHandler :: SubListL s r => HVect (HandlerList r) -> HVect (HandlerList s)
-extractHandler = extractHVect
+extractHandler :: SubList (HandlerList s) (HandlerList r) -> HVect (HandlerList r) -> HVect (HandlerList s)
+extractHandler Base r = HNil
+extractHandler (Keep sl) (r :&: rs) = r :&: unsafeCoerce (extractHandler (unsafeCoerce sl) (unsafeCoerce rs))
+extractHandler (Drop sl) (r :&: rs) = unsafeCoerce (extractHandler (unsafeCoerce sl) (unsafeCoerce rs))
+
 
 class SNatRep n where
     getSNat :: SNat n
@@ -355,12 +359,11 @@ extractHandlers :: forall n s r m ss dss tss rs.
    rs ~ HandlerList r,
    tss ~ TakeVect n ss,
    dss ~ DropVect n ss,
-   LenVect ss ~ m,
-   SubListL s r) =>
+   LenVect ss ~ m) =>
   SNat n -> SubList ss rs -> HVect rs -> (HVect tss, HVect dss)
 extractHandlers n sl rs = splitVectB n ss
   where ss :: HVect ss
-        ss = extractHandler rs
+        ss = extractHandler sl rs
 
 --extractHandlersM ::
 --  (SNatRep n,
@@ -408,8 +411,9 @@ Use the transitivity property of sublist
 
 \begin{code}
 data Proc (r :: [* -> *]) a where
-  Spawn ::  (fs ~ AppendVect ss k, ss ~ InitVect s, ss ~ TakeVect n fs, k ~ DropVect n fs, LastVect s ~ '[Proc k], SubListRep fs r) => SNat n -> SubList fs r -> Eff s () -> Proc r PID
-  Call ::   (LastVect r' ~ '[Proc k]) => HVect (HandlerListM r') -> Eff r' a -> Proc r a
+  Spawn ::  (fs ~ AppendVect ss ks, ss ~ InitVect s, n ~ LenVect ss, LastVect s ~ '[Proc ks]) => SNat n -> SubList fs r -> Eff s () -> Proc r PID
+  --Call ::   (LastVect r' ~ '[Proc k]) => HVect (HandlerListM r') -> Eff r' a -> Proc r a
+  LiftIO :: IO a -> Proc r a
   Send  :: DS.Serializable a => PID -> a ->  Proc r ()
   Expect :: DS.Serializable a => Proc r a
 \end{code}
@@ -423,26 +427,49 @@ Probably better with reintepret? Than we can move Proc r as the last handler. Mi
 \begin{code}
 runProc :: HVect (HandlerList r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
 runProc hl effs = translate (\case
-                                Spawn n sl eff -> undefined -- spawnHandler n (unsafeCoerce sl) hl eff
- --                               Call sl eff -> DP.callLocal (runM runProc $ runHandlerM sl eff)
+                                Spawn n sl eff -> proHandler (DP.spawnLocal . void) n (convertSublist sl) hl eff
+---                               Call sl eff -> DP.callLocal (runM runProc $ runHandlerM sl eff)
+                                LiftIO io -> liftIO io
                                 Send pid id -> DP.send pid id
                                 Expect -> DP.expect) effs
 
-spawnHandler ::  (
-   ss ~ HandlerList s,
-   rs ~ HandlerList r,
-   tss ~ TakeVect n ss,
-   dss ~ DropVect n ss,
-   LenVect ss ~ m,
-   SubListRep ss rs,
-   LastVect s ~ '[Proc k]) =>
-   SNat n -> SubList ss rs -> HVect rs -> Eff s () -> DP.Process PID
-spawnHandler n sl hl eff = DP.spawnLocal (runM $ runProc ks' (runListL ss' eff))
+convertSublist :: SubList s r -> SubList (HandlerList s) (HandlerList r)
+convertSublist = unsafeCoerce
+
+sendL :: (LastMember l effs) => l a -> Eff effs a
+sendL = undefined
+
+spawnProc :: (
+  SNatRep n,
+  ss ~ (InitVect s),
+  n ~ LenVect ss,
+  LastVect s ~ '[Proc ks],
+  LastMember (Proc r) effs,
+  fhs ~ AppendVect ss ks,
+  SubListRep fhs r)
+     => Eff s () -> Eff effs PID
+spawnProc eff = sendL (Spawn getSNat getSubList eff)
+
+proHandler :: forall b fs ss hr fhs n s ks r. (
+   fs ~ AppendVect ss ks,
+   ss ~ InitVect s,
+   hr ~ HandlerList r,
+   fhs ~ HandlerList fs,
+   LastVect s ~ '[Proc ks]) =>
+   (forall a . DP.Process a -> DP.Process b) -> SNat n -> SubList fhs hr -> HVect hr -> Eff s () -> DP.Process b
+proHandler f n sl hl eff = f (runM $ runProc ks' (runListL ss' eff))
   where (ss, ks) = extractHandlers n sl hl
-        ss' :: HVect (HandlerListM effs)
-        ss' = unsafeCoerce ss
-        ks' :: HVect (HandlerList k)
-        ks' =  unsafeCoerce (ks)
+        ss' :: HVect (HandlerListM s)
+        ss' =  unsafeCoerce ss
+        ks' :: HVect (HandlerList ks)
+        ks' =  unsafeCoerce ks
+
+testProc :: DP.Process PID
+testProc = runM (runProc handlers prog)
+  where
+    handlers = (FR.runReader "Hello" :&: FR.runReader (5 :: Int) :&: HNil)
+    prog :: Eff '[Proc '[FR.Reader String, FR.Reader Int]] PID
+    prog = (spawnProc f)
 \end{code}
 
 Probably need to rewrite the GADT slightly to make subproc operations easier
@@ -494,7 +521,7 @@ als nog kun je met commando's wel zeggen dat proc niet perse achteraan hoeft te 
 \begin{code}
 
 sendIO :: (LastMember (Proc r) effs) => IO a -> Eff effs a
-sendIO = undefined
+sendIO = sendL . LiftIO
 
 g :: Eff '[FR.Reader Int, Proc '[FR.Reader String]] ()
 g = do s <- call gh
