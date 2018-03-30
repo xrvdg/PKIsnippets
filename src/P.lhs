@@ -122,13 +122,14 @@ Might be possible to reduce the amount tof code by letting runList call runListM
 
 lesson: don't try to combine -> substract
 
-type family InitVect xs :: [* -> *] where
-   InitVect '[x] = '[]
-   InitVect (t ': ts) = t ': (InitVect ts)
 
 InitVect necessary anymore since we can get the InitVect effect using HandlerListM with injectivivity
 
 \begin{code}
+type family InitVect xs :: [k] where
+   InitVect '[x] = '[]
+   InitVect (t ': ts) = t ': (InitVect ts)
+
 type family LastVect xs :: [k] where
    LastVect '[x] = '[x]
    LastVect (t ': ts) = LastVect ts
@@ -203,7 +204,7 @@ testRun3 = run (runList (Handler (FR.runReader 5) :&: Handler (FS.evalState 3) :
 Make handlerlist be non-empty such that it can be injective.
 This is used to be able to work with SubLists.
 \begin{code}
-type family HandlerList (effs :: [* -> *]) = result | result -> effs where
+type family HandlerList effs = result | result -> effs where
   HandlerList '[] = '[]
   HandlerList (eff ': effs) = (Handler eff effs) ': HandlerList effs
 \end{code}
@@ -211,7 +212,7 @@ type family HandlerList (effs :: [* -> *]) = result | result -> effs where
 We instroduce an extra list for handlers such that we get one entry less, but that this last
 entry is still recorded in the effects lists. That is why Handerlist in combination with InitVect didn't work
 \begin{code}
-type family HandlerListM (effs :: [* -> *]) where
+type family HandlerListM effs = result | result -> effs where
   HandlerListM '[eff, m] = '[Handler eff '[m]]
   HandlerListM (eff ': effs) = (Handler eff effs) ': HandlerListM effs
 \end{code}
@@ -373,7 +374,7 @@ Use the transitivity property of sublist
 
 \begin{code}
 data Proc (r :: [* -> *]) a where
-  Spawn ::  (LastVect s ~ '[Proc k], SubListRep (FlattenProc s) r) => Eff s () -> Proc r PID
+  Spawn ::  (LastVect s ~ '[Proc k], SubListRep (FlattenProc s) r) => Proxy (InitVect s) -> Proxy k -> Eff s () -> Proc r PID
   Call ::   (LastVect r' ~ '[Proc k]) => HVect (HandlerListM r') -> Eff r' a -> Proc r a
   Send  :: DS.Serializable a => PID -> a ->  Proc r ()
   Expect :: DS.Serializable a => Proc r a
@@ -386,9 +387,9 @@ The thing is that we can give it an identity function or some lifter such that i
 
 Probably better with reintepret? Than we can move Proc r as the last handler. Might make stuff easier.
 \begin{code}
-runProc :: HVect (HandlerListM r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
+runProc :: HVect (HandlerList r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
 runProc hl effs = translate (\case
-  --                              Spawn sl eff -> DP.spawnLocal (runProc $ runHandlerM sl eff)
+                                Spawn ps pk eff -> let (ss, ks) = extractHandlers hl in DP.spawnLocal (runM $ runProc ks _)
  --                               Call sl eff -> DP.callLocal (runM runProc $ runHandlerM sl eff)
                                 Send pid id -> DP.send pid id
                                 Expect -> DP.expect) effs
@@ -542,3 +543,7 @@ splitVect n xs = (takeVect n xs, dropVect n xs)
 splitVectB :: (LenVect ss' ~ n, ss ~ AppendVect ss' ks, DropVect n ss ~ ks, TakeVect n ss ~ ss') => SNat n -> HVect ss -> (HVect ss', HVect ks)
 splitVectB n xs = splitVect n xs
 \end{code}
+
+Voeg type family toe voor partial application
+
+type family HandlerListPartial effs effs2 where
