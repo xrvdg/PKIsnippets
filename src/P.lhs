@@ -143,6 +143,7 @@ type family LastVect xs :: [k] where
 
 LastVect might be replacible by LastMember, but it is not a drop in replacement, and seems to need (unsafe) coercing that
 is more cumbersome that the (LastVect effs ~ '[m]) coercing we do now.
+-> Not the case, LastMember is only a type level computation using class/instances. It has no result
 
 \begin{code}
 runHandlerM :: (LastVect effs ~ '[m], Monad m) => HVect (HandlerListM effs) -> Eff effs a -> m a
@@ -413,8 +414,8 @@ Use the transitivity property of sublist
 
 \begin{code}
 data Proc (r :: [* -> *]) a where
-  Spawn ::  (fs ~ AppendVect ss ks, ss ~ InitVect s, n ~ LenVect ss, LastVect s ~ '[Proc ks]) => SNat n -> SubList fs r -> Eff s () -> Proc r PID
-  Call ::  (fs ~ AppendVect ss ks, ss ~ InitVect s, n ~ LenVect ss, LastVect s ~ '[Proc ks]) => SNat n -> SubList fs r -> Eff s a -> Proc r a
+  Spawn ::  (fs ~ FlattenProc s, ss ~ TillProc s, n ~ LenVect ss) => SNat n -> SubList fs r -> Eff s () -> Proc r PID
+  Call ::  (fs ~ FlattenProc s, ss ~ TillProc s, n ~ LenVect ss) => SNat n -> SubList fs r -> Eff s a -> Proc r a
   LiftIO :: IO a -> Proc r a
   Send  :: DS.Serializable a => PID -> a ->  Proc r ()
   Expect :: DS.Serializable a => Proc r a
@@ -441,43 +442,45 @@ convertSublist = unsafeCoerce
 sendL :: (LastMember l effs) => l a -> Eff effs a
 sendL = send
 
-liftProc :: Eff effs a -> Eff (effs :++: '[Proc '[]]) a
-liftProc = unsafeCoerce
+type family TillProc xs where
+  TillProc '[Proc ks] = '[]
+  TillProc '[] = '[]
+  TillProc (x ': xs) = x ': (TillProc xs)
 
-call = callProc . liftProc
+type family GetProcContent xs where
+  GetProcContent '[Proc ks] = ks
+  GetProcContent '[] = '[]
+  GetProcContent (x ': xs) = GetProcContent xs
 
-callProc :: (
+call :: (
   SNatRep n,
-  ss ~ (InitVect s),
+  ss ~ (TillProc s),
   n ~ LenVect ss,
-  LastVect s ~ '[Proc ks],
   LastMember (Proc r) effs,
-  fhs ~ AppendVect ss ks,
+  fhs ~ FlattenProc s,
   SubListRep fhs r)
      => Eff s a -> Eff effs a
-callProc eff = sendL (Call getSNat getSubList eff)
+call eff = sendL (Call getSNat getSubList eff)
 
-spawn = spawnProc . liftProc
-
-spawnProc :: (
+spawn :: (
   SNatRep n,
-  ss ~ (InitVect s),
+  ss ~ (TillProc s),
   n ~ LenVect ss,
   LastVect s ~ '[Proc ks],
   LastMember (Proc r) effs,
-  fhs ~ AppendVect ss ks,
+  fhs ~ FlattenProc s,
   SubListRep fhs r)
      => Eff s () -> Eff effs PID
-spawnProc eff = sendL (Spawn getSNat getSubList eff)
+spawn eff = sendL (Spawn getSNat getSubList eff)
 
 proHandler :: forall a b fs ss hr fhs n s ks r. (
-   fs ~ AppendVect ss ks,
-   ss ~ InitVect s,
+   fs ~ FlattenProc s,
+   ss ~ TillProc s,
    hr ~ HandlerList r,
    fhs ~ HandlerList fs,
-   LastVect s ~ '[Proc ks]) =>
+   ks ~ GetProcContent s) =>
    (DP.Process a -> DP.Process b) -> SNat n -> SubList fhs hr -> HVect hr -> Eff s a -> DP.Process b
-proHandler f n sl hl eff = f (runM $ runProc ks' (runListL ss' eff))
+proHandler f n sl hl eff = f (runM $ runProc ks' (unsafeCoerce (runListL ss' eff)))
   where (ss, ks) = extractHandlers n sl hl
         ss' :: HVect (HandlerListM s)
         ss' =  unsafeCoerce ss
@@ -496,17 +499,17 @@ testProcIO2 = do
     node <- newLocalNode backend
     Node.runProcess node (void testProc)
 
-testProc :: DP.Process PID
+testProc :: DP.Process ()
 testProc = runM (runProc handlers prog)
   where
     handlers = (Handler (FR.runReader "Hello") :&: Handler (FR.runReader (5 :: Int)) :&: HNil)
-    prog = (spawnProc f)
+    prog = call f
 
 testProc2 :: DP.Process PID
 testProc2 = runM (runProc handlers prog)
   where
     handlers = (Handler (FR.runReader "Hello") :&: Handler (FR.runReader (5 :: Int)) :&: HNil)
-    prog = (spawnProc j)
+    prog = spawn j
 \end{code}
 
 Probably need to rewrite the GADT slightly to make subproc operations easier
@@ -524,10 +527,10 @@ Maybe we can drop the proxy with something else, or wrap it in some kind of gadt
 Adding a flatten for s will probably suffice
 
 \begin{code}
-hh :: Eff '[FR.Reader Int, Proc '[]] Int
+hh :: Eff '[FR.Reader Int] Int
 hh = FR.ask
 
-gh :: Eff '[FR.Reader String, Proc '[]] String
+gh :: Eff '[FR.Reader String] String
 gh = FR.ask
 
 f :: Eff [FR.Reader String, FR.Reader Int, Proc '[]] ()
@@ -553,12 +556,12 @@ sendIO :: (LastMember (Proc r) effs) => IO a -> Eff effs a
 sendIO = sendL . LiftIO
 
 g :: Eff '[FR.Reader Int, Proc '[FR.Reader String]] ()
-g = do s <- callProc gh
+g = do s <- call gh
        i <- FR.ask @Int
        sendIO $ putStrLn (s ++ show i)
 
 h :: Eff '[FR.Reader String, Proc '[FR.Reader Int]] ()
-h = do i <- callProc hh
+h = do i <- call hh
        s <- FR.ask @String
        sendIO $ putStrLn (s ++ show i)
 
@@ -574,16 +577,16 @@ i = do i <- call hh
 
 \begin{code}
 j :: Eff '[Proc '[FR.Reader String, FR.Reader Int]] ()
-j = do i <- callProc hh
-       s <- callProc gh
+j = do i <- call hh
+       s <- call gh
        sendIO $ putStrLn (s ++ show i)
 \end{code}
 
 \begin{code}
 type family FlattenProc xs where
-  FlattenProc (Proc r ': xs) = FlattenProc r :++: FlattenProc xs
-  FlattenProc (x ': xs) = x ': FlattenProc xs
+  FlattenProc '[Proc r] = r
   FlattenProc '[] = '[]
+  FlattenProc (x ': xs) = x ': FlattenProc xs
 \end{code}
 
 Wrap constraints into a type, and possible use a type family such that a single constraint can be used?
