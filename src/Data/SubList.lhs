@@ -40,3 +40,10 @@ instance {-# OVERLAPPING #-} SubListRep xs ys =>  SubListRep  (x ': xs) (x ': ys
 instance {-# OVERLAPPABLE #-} SubListRep xs ys =>  SubListRep xs (y ': ys) where
   getSubList = Drop getSubList
 \end{code}
+
+While overlappinginstances is a little bit frowned up on. In this case
+writing an overlapping instance is easier than coming up with a non-overlapping encoding.
+See Dependent types using singletons for a non-overlapping version. However, that variant
+might lean too heavy on singleton specific properties.
+See the earlier remark about singletons, and why those do not work as-is with this
+library.
