@@ -2,46 +2,30 @@ To allow type level lists
 \begin{code}
 {-# language KindSignatures, DataKinds, TypeOperators #-}
 \end{code}
-
 Need Rank2Types more often than not
 \begin{code}
 {-# language RankNTypes #-}
 \end{code}
-
 To allow the definition of effects
 \begin{code}
 {-# language GADTs #-}
 \end{code}
-
 Type families are used heavy for all kinds of dependently typed programming.
 For the more difficult cases typefamilydependencies helps the compiler resolve it.
 \begin{code}
 {-# language TypeFamilies, TypeFamilyDependencies #-}
 \end{code}
-
 Required for gets
 \begin{code}
 {-# language TypeApplications #-}
 \end{code}
-
 Makes writing handler a litte bit nicer
 \begin{code}
 {-# language LambdaCase #-}
 \end{code}
-
 required to be able to work with Member, Lastmember
 \begin{code}
 {-# language FlexibleContexts #-}
-\end{code}
-
-\begin{code}
-{-# language MultiParamTypeClasses, FlexibleInstances #-}
-\end{code}
-
-
-Required for the splitvect handling
-\begin{code}
-{-# language UndecidableInstances #-}
 \end{code}
 
 Not strictly necessary but does make it easier to write code that uses unsafeCoerce in a somewhat safer manner
