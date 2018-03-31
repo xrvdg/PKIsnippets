@@ -26,7 +26,7 @@ required to be able to work with Member, Lastmember
 {-# language ScopedTypeVariables #-}
 \end{code}
 \begin{code}
-module P (runProc, spawn, call, sendIO) where
+module Control.Monad.Freer.Proc (runProc, spawn, call, sendIO) where
 import Control.Monad.Freer
 import qualified Control.Distributed.Process as DP
 import qualified Control.Distributed.Process.Serializable as DS

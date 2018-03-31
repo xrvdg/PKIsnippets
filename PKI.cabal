@@ -16,7 +16,7 @@ extra-source-files:  ChangeLog.md, README.org
 cabal-version:       >=1.10
 
 library
-  exposed-modules:     Data.HVect.Utils, Data.SubList, P
+  exposed-modules:     Data.HVect.Utils, Data.SubList, Control.Monad.Freer.Proc , Control.Monad.Freer.Handler
   ghc-options:         -Wall
   build-depends:       base
                        , hasbolt
