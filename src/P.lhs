@@ -49,28 +49,18 @@ Not strictly necessary but does make it easier to write code that uses unsafeCoe
 {-# language ScopedTypeVariables #-}
 \end{code}
 \begin{code}
-module P () where
+module P (runProc, runList, runListL, runHandler, runHandlers, runHandlersM, spawn, call, sendIO) where
 import Control.Monad.Freer
 import Control.Monad (void)
 import qualified Control.Distributed.Process as DP
 import qualified Control.Distributed.Process.Serializable as DS
-import qualified Control.Distributed.Process.Node as Node
-import Control.Distributed.Process.Backend.SimpleLocalnet (initializeBackend, newLocalNode)
 import Unsafe.Coerce
 \end{code}
 
 \begin{code}
-import Data.HVect as HV
+import Data.HVect
 import Data.HVect.Utils
 import Data.SubList
-\end{code}
-Below is required for the test
-\begin{code}
-import qualified Control.Monad.Freer.Internal as FI
-import qualified Control.Monad.Freer.Reader as FR
-import qualified Control.Monad.Freer.State as FS
-import Control.Monad.IO.Class
-import System.Exit hiding (ExitCode(ExitSuccess))
 \end{code}
 
 Singletons would probably work if the library was setup a little bit differently.
@@ -78,10 +68,6 @@ But we are working with GADTs so just dropping them in does not seem to work.
 We would like to use the s* functions to work with lists.
 But our handler is not promotable due to the GADTs it in turn depends on.
 And just using them for the few type families it has has a too big cost.
-import qualified Data.Singletons.Prelude.List as SL
-import qualified Data.Singletons.TypeLits as STL
-import qualified Data.Singletons.Prelude.Num as SN
-import qualified Data.Singletons.TH as STH
 
 The handler functions do typically not depend on a fixed structure of the effect list, but
 might have requirements for the last, and maybe even multiple members of the list.
@@ -176,77 +162,6 @@ instance SNatRep n => SNatRep ('Succ n) where
     getSNat = SSucc getSNat
 \end{code}
 
-runList testcode
-\begin{code}
-test1 :: Eff '[FS.State Int] Int
-test1 =  FS.get
-
-test2 :: Eff '[FR.Reader Int] Int
-test2 = FR.ask
-
-test :: Eff '[FR.Reader Int, FS.State Int] Int
-test = do n <- FS.get @Int
-          m <- FR.ask
-          FS.put (n + m)
-          FS.put (n + m + 1)
-          FS.put (n + m + 2)
-          FS.get @Int
-
-testRun :: Int
-testRun = run (FS.evalState 3 (FR.runReader 5 test))
-
-test1Run3 :: Int
-test1Run3 = run (runList ((Handler (FS.evalState 3)) :&: HNil) test1)
-
-test2Run3 :: Int
-test2Run3 = run (runList (Handler (FR.runReader 5) :&: HNil) test2)
-
-testRun3 :: Int
-testRun3 = run (runList (Handler (FR.runReader 5) :&: Handler (FS.evalState 3) :&: HNil) test)
-\end{code}
-
-The console code is a slightly more eleborate test. The code is taken from the freer-simple documentation.
-\begin{code}
-data Console r where
-  PutStrLn    :: String -> Console ()
-  GetLine     :: Console String
-  ExitSuccess :: Console ()
-
-putStrLn' :: Member Console effs => String -> Eff effs ()
-putStrLn' = send . PutStrLn
-
-getLine' :: Member Console effs => Eff effs String
-getLine' = send GetLine
-
-exitSuccess' :: Member Console effs => Eff effs ()
-exitSuccess' = send ExitSuccess
-
-runConsole :: Eff '[Console, IO] a -> IO a
-runConsole = runM . runConsole'
-
-runConsole' :: (MonadIO m, LastMember m effs) => Eff (Console ': effs) a -> Eff effs a
-runConsole' = interpretM (\case
-  PutStrLn msg -> liftIO $ putStrLn msg
-  GetLine -> liftIO $ getLine
-  ExitSuccess -> liftIO $ exitSuccess)
-\end{code}
-
-\begin{code}
-testIO :: Eff '[Console, IO] ()
-testIO = do putStrLn' "Hello, World"
-            exitSuccess'
-
-testIORun :: IO ()
-testIORun = runConsole testIO
-\end{code}
-
-The following is a nice test to check if adding constrains also works
-\begin{code}
-testIORun2 :: IO ()
-testIORun2 = runHandlersM (Handler runConsole' :&: HNil) testIO
-\end{code}
-
-
 While overlappinginstances is a little bit frowned up on. In this case
 writing an overlapping instance is easier than coming up with a non-overlapping encoding.
 See Dependent types using singletons for a non-overlapping version. However, that variant
@@ -259,9 +174,9 @@ To overcome this limitation we need to wrap clauses with unsafeCoerce.
 \begin{code}
 -- | Specialized version of 'extractHVect' for 'Handerlist'
 extractHandler :: SubList (HandlerList s) (HandlerList r) -> HVect (HandlerList r) -> HVect (HandlerList s)
-extractHandler Base r = HNil
+extractHandler Base _ = HNil
 extractHandler (Keep sl) (r :&: rs) = r :&: unsafeCoerce (extractHandler (unsafeCoerce sl) (unsafeCoerce rs))
-extractHandler (Drop sl) (r :&: rs) = unsafeCoerce (extractHandler (unsafeCoerce sl) (unsafeCoerce rs))
+extractHandler (Drop sl) (_ :&: rs) = unsafeCoerce (extractHandler (unsafeCoerce sl) (unsafeCoerce rs))
 \end{code}
 
 \begin{code}
@@ -315,8 +230,8 @@ runProc hl effs = translate (procCases hl) effs
 procCases :: HVect (HandlerList r) -> Proc r a -> DP.Process a
 procCases hl (Spawn n sl eff) = procHandler (DP.spawnLocal . void) n (convertSublist sl) hl eff
 procCases hl (Call n sl eff) = procHandler DP.callLocal n (convertSublist sl) hl eff
-procCases _ (LiftIO io) = liftIO io
-procCases _ (Send pid id) = DP.send pid id
+procCases _ (LiftIO io) = DP.liftIO io
+procCases _ (Send pid a) = DP.send pid a
 procCases _ Expect = DP.expect
 procCases _ (Say str) = DP.say str
 
@@ -402,93 +317,24 @@ procHandler f n sl hl eff = f (runM $ runProc ks' (unsafeCoerce (runListL ss' ef
         ks' =  unsafeCoerce ks
 \end{code}
 
-\begin{code}
-testProcIO :: IO ()
-testProcIO = do
-    backend <- initializeBackend "127.0.0.1" "8230" Node.initRemoteTable
-    node <- newLocalNode backend
-    Node.runProcess node (void testProc)
-
-testProcIO2 :: IO ()
-testProcIO2 = do
-    backend <- initializeBackend "127.0.0.1" "8231" Node.initRemoteTable
-    node <- newLocalNode backend
-    Node.runProcess node (void testProc)
-
-testProc :: DP.Process ()
-testProc = runM (runProc handlers prog)
-  where
-    handlers = (Handler (FR.runReader "Hello") :&: Handler (FR.runReader (5 :: Int)) :&: HNil)
-    prog = call f
-
-testProc2 :: DP.Process PID
-testProc2 = runM (runProc handlers prog)
-  where
-    handlers = (Handler (FR.runReader "Hello") :&: Handler (FR.runReader (5 :: Int)) :&: HNil)
-    prog = spawn j
-\end{code}
-
-\begin{code}
-hh :: Eff '[FR.Reader Int] Int
-hh = FR.ask
-
-gh :: Eff '[FR.Reader String] String
-gh = FR.ask
-
-\end{code}
-
-Currently functions that what to use IO functionality need to be explicitely augmented with Proc '[], and have special functions
-for those handlers to do the lifting.
-This could be fixed by introducing an spawnIO/callIO functions or by going through the Union (The effs) which takes the content of the last entry
-and puts a DP.liftIO before it. Maybe even generalizing it, by having a spawn function which you pass how it should reintepret it. A reintepret last.
-This would require writing a replaceRelay function specialized to LastMember.
-
 lesson: Break through layers of abstraction. Usually you do not want to have to know how something is implemented.
 But when using unsafeCoerce, or other tricks to reduce code or even worse type level hacking, just peel back the curtains.
 In this library we do make use of some properties of OpenUnion and effect code specific. The implementation is
 perfect for what we want just the provided interface is not exactly what we need.
-
-\begin{code}
-f :: Eff [FR.Reader String, FR.Reader Int, Proc '[]] ()
-f = do s <- FR.ask @String
-       i <- FR.ask @Int
-       sendIO $ putStrLn (s ++ show i)
-\end{code}
 
 lesson: implicitparams still requires passing the argument sometime and also gives you more
 constraints to your functions. In this case it didn't add anything extra.
 
 lesson: TODO substractive vs additive synthesis.
 
+Currently functions that what to use IO functionality need to be explicitely augmented with Proc '[], and have special functions
+for those handlers to do the lifting.
+This could be fixed by introducing an spawnIO/callIO functions or by going through the Union (The effs) which takes the content of the last entry
+and puts a DP.liftIO before it. Maybe even generalizing it, by having a spawn function which you pass how it should reintepret it. A reintepret last.
+This would require writing a replaceRelay function specialized to LastMember.
 \begin{code}
 sendIO :: (LastMember (Proc r) effs) => IO a -> Eff effs a
 sendIO = sendL . LiftIO
-
-g :: Eff '[FR.Reader Int, Proc '[FR.Reader String]] ()
-g = do s <- call gh
-       i <- FR.ask @Int
-       sendIO $ putStrLn (s ++ show i)
-
-h :: Eff '[FR.Reader String, Proc '[FR.Reader Int]] ()
-h = do i <- call hh
-       s <- FR.ask @String
-       sendIO $ putStrLn (s ++ show i)
-
-\end{code}
-
-its type should still be a valid instance it just isn't that useful.
-The code, however, shouldn't work
-
-i :: Eff [Proc '[FR.Reader String], Proc '[FR.Reader Int]] ()
-i = do i <- call hh
-       s <- call gh
-       sendM $ liftIO $ putStrLn (s ++ show i)
-
-\begin{code}
-j :: Eff '[Proc '[FR.Reader String, FR.Reader Int]] ()
-j = do i <- call hh
-       s <- call gh
-       sendIO $ putStrLn (s ++ show i)
 \end{code}
 
 Since by convention we only use the last Proc for handling, when we flatten
