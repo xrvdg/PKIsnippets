@@ -42,7 +42,7 @@ liftUI = send . LiftUI
 
 \end{code}
 \begin{code}
-onEventProcess  :: forall a n s r effs b. (FP.ProcConstraint n '[FP.Proc s] r, FP.ProcConstraint n s s, Serializable a, Member UI effs, FP.ProcConstraint n s r, LastMember (FP.Proc r) effs) => TPG.Event a -> (a -> Eff s b) -> (b -> TPG.UI ()) -> Eff effs ()
+onEventProcess  :: forall a n s r effs b. (FP.ProcConstraints n s r, Serializable a, Member UI effs, LastMember (FP.Proc r) effs) => TPG.Event a -> (a -> Eff s b) -> (b -> TPG.UI ()) -> Eff effs ()
 onEventProcess event handler callback = void $  do
        (callbackev, fire) <- FP.liftIO TPG.newEvent
        let pt = processTask fire handler
