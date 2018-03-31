@@ -23,25 +23,20 @@ executable TPG
                        binary,
                        PKI,
                        text,
-                       aeson
-                       , distributed-process
+                       distributed-process
                        , distributed-process-simplelocalnet
                        , bytestring
                        , hvect
   hs-source-dirs:      src
+  other-modules:       Control, Debug, Forms.AddRemove, TPGEff
   main-is:             Main.lhs
 
 library
   exposed-modules:     Data.HVect.Utils, Data.SubList, Control.Monad.Freer.Proc , Control.Monad.Freer.Handler
   ghc-options:         -Wall
   build-depends:       base
-                       , hasbolt
-                       , data-default
-                       , bytestring
                        , distributed-process
                        , distributed-process-simplelocalnet
-                       , mtl
-                       , resource-pool
                        , freer-simple
                      , hvect
   hs-source-dirs:      lib
