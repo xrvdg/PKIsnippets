@@ -23,9 +23,10 @@ fix f = let {x = f x} in x
 
 processTask :: (
   Serializable a,
-  FP.ProcConstraint n s r
+  s' ~ FP.FlattenProc s,
+  FP.ProcConstraint n s s'
    )
-     => TPG.Handler b -> (a -> Eff s b) -> Eff '[FP.Proc r] ()
+     => TPG.Handler b -> (a -> Eff s b) -> Eff '[FP.Proc s'] ()
 processTask h f = fix (\pt h f ->
                 do a <- FP.expect
                    FP.say $ "received: "
@@ -44,10 +45,10 @@ runUI :: (LastMember (FP.Proc r) effs) => TPG.Window -> Eff (UI ': effs) a -> Ef
 runUI w = interpret (\(LiftUI ui) -> FP.liftIO $ TPG.runUI w ui)
 \end{code}
 \begin{code}
-onEventProcess  :: forall n s r a b effs. (FP.ProcConstraint n '[FP.Proc r] r, FP.ProcConstraint n s r, Serializable a, Member UI effs, LastMember (FP.Proc r) effs) => TPG.Event a -> (a -> Eff s b) -> (b -> TPG.UI ()) -> Eff effs ()
+onEventProcess  :: forall n s r a b effs. (FP.ProcConstraint n s r, Serializable a, Member UI effs, LastMember (FP.Proc r) effs) => TPG.Event a -> (a -> Eff s b) -> (b -> TPG.UI ()) -> Eff effs ()
 onEventProcess event handler callback = void $  do
        (callbackev, fire) <- FP.liftIO TPG.newEvent
-       let pt = processTask fire handler :: Eff '[FP.Proc r] ()
+       let pt = processTask fire handler
        pid <- FP.spawn pt
        sio <- FP.runIO (FP.send pid)
        liftUI $ do
