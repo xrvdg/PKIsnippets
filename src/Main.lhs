@@ -2,6 +2,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 import Graphics.UI.Threepenny as GUT hiding (register)
 import TPGEff
@@ -16,6 +18,7 @@ import qualified Control.Distributed.Process as DP
 import Control.Distributed.Process.Backend.SimpleLocalnet
 import qualified Control.Distributed.Process.Node as Node
 import Control
+import Unsafe.Coerce
 
 \end{code}
 
@@ -23,13 +26,14 @@ import Control
 main :: IO ()
 main = startApp setup
 
-setup :: (ProcConstraint n '[] '[]) => Window -> Eff '[TPGEff.UI, Proc '[]] ()
+setup :: (r ~ '[TPGEff.UI, Proc '[]], ProcConstraint n '[] '[], ProcConstraint n '[Proc '[]] '[]) => Window -> Eff r ()
 setup w = do
   cv <- controlView
   void $ TPGEff.liftUI (do
     return w # set title "test neo4j"
     getBody w #+ [element cv])
 \end{code}
+
 \begin{code}
 startApp :: (Window -> Eff '[TPGEff.UI, Proc '[]] ()) -> IO ()
 startApp appui = do

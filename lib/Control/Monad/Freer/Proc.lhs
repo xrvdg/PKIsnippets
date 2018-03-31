@@ -149,6 +149,8 @@ instance SNatRep n => SNatRep ('Succ n) where
 \begin{code}
 class (SNatRep n, n ~ LenVect (TillProc s), SubListRep (FlattenProc s) r) => ProcConstraint n s r where
 
+instance (SNatRep n, n ~ LenVect (TillProc s), SubListRep (FlattenProc s) r) => ProcConstraint n s r where
+
 class (ProcConstraint n '[Proc s] r, ProcConstraint n s r, ProcConstraint n s s) => ProcConstraints n s r where
 
 call :: (ProcConstraint n s r, LastMember (Proc r) effs) => Eff s a -> Eff effs a
