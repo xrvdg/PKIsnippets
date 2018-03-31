@@ -308,6 +308,13 @@ instance {-# OVERLAPPABLE #-} SubListRep xs ys =>  SubListRep xs (y ': ys) where
   getSubList = Drop getSubList
 \end{code}
 
+While overlappinginstances is a little bit frowned up on. In this case
+writing an overlapping instance is easier than coming up with a non-overlapping encoding.
+See Dependent types using singletons for a non-overlapping version. However, that variant
+might lean too heavy on singleton specific properties.
+See the earlier remark about singletons, and why those do not work as-is with this
+library.
+
 \begin{code}
 -- | Extract the sublist given the larger list with explicit evidence passing.
 extractHVect' :: SubList xs ys -> HVect ys -> HVect xs
@@ -320,7 +327,7 @@ extractHVect :: (SubListRep xs ys) => HVect ys -> HVect xs
 extractHVect = extractHVect' (getSubList)
 \end{code}
 
-This is a specialized version of extractHVect' since GHC type inference is good enough.
+This is a specialized version of extractHVect' since GHC type inference is not good enough.
 To overcome this limitation we need to wrap clauses with unsafeCoerce.
 \begin{code}
 -- | Specialized version of 'extractHVect' for 'Handerlist'
@@ -339,11 +346,13 @@ extractHandlers :: forall n s r m ss dss tss rs.
    dss ~ DropVect n ss,
    LenVect ss ~ m) =>
   SNat n -> SubList ss rs -> HVect rs -> (HVect tss, HVect dss)
-
 extractHandlers n sl rs = splitVect n ss
   where ss :: HVect ss
         ss = extractHandler sl rs
 \end{code}
+
+lesson: use ScopedTypeVariables (and forall) to guide the compiler what the types should be.
+This is often easier and requires less code than splitting it out into a seperate function.
 
 \begin{code}
 type family LenVect xs where
@@ -376,14 +385,8 @@ data Proc (r :: [* -> *]) a where
   Say :: String -> Proc r ()
 \end{code}
 
-Since we now have subset proof those are probably cheaper to pass. But lets first keep it at run instances.
--> Not going to work due to needing it when spawning
-
-Probably it is always going to need a proc instance.
-The thing is that we can give it an identity function or some lifter such that it can't do much
-
-Probably better with reintepret? Than we can move Proc r as the last handler. Might make stuff easier.
 \begin{code}
+-- | Handler which translates Proc commands into the Process monad operations.
 runProc :: HVect (HandlerList r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
 runProc hl effs = translate (procCases hl) effs
 
@@ -398,7 +401,8 @@ procCases _ (Say str) = DP.say str
 \end{code}
 
 The sublist encoding of s and r, and the sublist of a function list on s and r are the same.
-Therefore we can convert one in the other.
+Therefore we can convert one in the other. Repacking the encoding doesn't work because the kinds
+of lists parameters to the SubList are different.
 \begin{code}
 convertSublist :: SubList s r -> SubList (HandlerList s) (HandlerList r)
 convertSublist = unsafeCoerce
@@ -415,7 +419,7 @@ sendL = send
 Lesson: sometimes specialized is a bad thing since the compiler cannot inference. Other times specialization
 is the only way to really enforce something. Practically of this advice -> 0.
 
-These two type families allows use to be polymorphic in the kind of effects we except to spawn and call.
+These two type families allows use to be polymorphic in the kind of effects we accept to spawn and call.
 \begin{code}
 type family TillProc xs where
   TillProc '[Proc ks] = '[]
@@ -502,14 +506,6 @@ testProc2 = runM (runProc handlers prog)
     prog = spawn j
 \end{code}
 
-Subtype, zal ook weer iets van sublist worden.
-
-Tests for the cases we want to support with proc
-
-Maybe we can drop the proxy with something else, or wrap it in some kind of gadt
-
-Adding a flatten for s will probably suffice
-
 \begin{code}
 hh :: Eff '[FR.Reader Int] Int
 hh = FR.ask
@@ -519,13 +515,16 @@ gh = FR.ask
 
 \end{code}
 
-Currently function that what to use IO functionality need to be explicitely augmented with Proc '[], and have special functions
+Currently functions that what to use IO functionality need to be explicitely augmented with Proc '[], and have special functions
 for those handlers to do the lifting.
 This could be fixed by introducing an spawnIO/callIO functions or by going through the Union (The effs) which takes the content of the last entry
 and puts a DP.liftIO before it. Maybe even generalizing it, by having a spawn function which you pass how it should reintepret it. A reintepret last.
 This would require writing a replaceRelay function specialized to LastMember.
 
-liftIO :: (LastMember IO s, ss ~ InitVect effs, r ~ AppendVect '[Proc '[]]) => Eff s a -> Eff r a
+lesson: Break through layers of abstraction. Usually you do not want to have to know how something is implemented.
+But when using unsafeCoerce, or other tricks to reduce code or even worse type level hacking, just peel back the curtains.
+In this library we do make use of some properties of OpenUnion and effect code specific. The implementation is
+perfect for what we want just the provided interface is not exactly what we need.
 
 \begin{code}
 f :: Eff [FR.Reader String, FR.Reader Int, Proc '[]] ()
@@ -533,18 +532,11 @@ f = do s <- FR.ask @String
        i <- FR.ask @Int
        sendIO $ putStrLn (s ++ show i)
 \end{code}
-Using implicitparameters does make it easier to change. We should however add defaultsignatures such that the first is
-choosen by default
 
-De volgende instanties hebben last van overlapping instances
-Of stap over dat Proc de laatste moet zijn in de chain.
+lesson: implicitparams still requires passing the argument sometime and also gives you more
+constraints to your functions. In this case it didn't add anything extra.
 
-Iemand kan dan meerdere procs hebben, maar daar zul je niet echt heel veel last van hebben.
-
-Misschien is type application ook wel te gebruiken?
-Je kunt alleen maar substractive synthesis niet additive synthesis.
-Dus als je iets echt wilt moet het of vooraan, of achteraan staan.
-als nog kun je met commando's wel zeggen dat proc niet perse achteraan hoeft te staan?
+lesson: TODO substractive vs additive synthesis.
 
 \begin{code}
 sendIO :: (LastMember (Proc r) effs) => IO a -> Eff effs a
@@ -562,8 +554,8 @@ h = do i <- call hh
 
 \end{code}
 
-i's type should still be a valid instance it just isn't that useful.
-The code shouldn't work
+its type should still be a valid instance it just isn't that useful.
+The code, however, shouldn't work
 
 i :: Eff [Proc '[FR.Reader String], Proc '[FR.Reader Int]] ()
 i = do i <- call hh
@@ -577,8 +569,11 @@ j = do i <- call hh
        sendIO $ putStrLn (s ++ show i)
 \end{code}
 
-lesson: by making proc the last entry the concattination becomes simple
-enough for the compiler to work with it.
+Since by convention we only use the last Proc for handling, when we flatten
+the handler list we also assume that it is only at the end. Unpacking the
+last element rather than every occurence of Proc made it easier to work
+with the rest of type instances and code that assumes that proc is the last
+entry.
 \begin{code}
 type family FlattenProc xs where
   FlattenProc '[Proc r] = r
@@ -586,69 +581,54 @@ type family FlattenProc xs where
   FlattenProc (x ': xs) = x ': FlattenProc xs
 \end{code}
 
-Wrap constraints into a type, and possible use a type family such that a single constraint can be used?
 
-Nodig is een lift into
-
-De processes zullen van drie soorten zijn nadat alle handler zijn uitgevoerd:
-- puur -> Eff '[] a. Deze zijn in proc te krijgen met raise
-- IO -> Eff '[IO] a
-- Process -> Eff '[Process] a of Eff '[Proc r] a
-
-Van Eff '[IO] a naar Eff '[Process] a is een translate met liftio
-Van Eff '[IO] a naar Eff ''
-
-Stel we vereisen niet/gaan er van uit dat Proc r niet nog een Proc bevalt (Proc '[...., Proc]')
-Dan is Handler r een lijst van alle handlers die we mogen gebruiken.
-
-Gezien we runListM kunnen gebruiken willen we dus eigenlijk
-InitVect s als handlerlist
-
-Dit is wat we willen hebben
-createHandler (LastMember (Proc k) s) (SubListRep k r) => Handerlist r -> Handerlist s
-
-Waar dus de laatste entry van Handerlist s -> Handler (Proc k) '[]
-
-easy is
-
-createHandler (LastMember (Proc k) s) (SubListRep k r) => Handerlist r -> Handerlist s
-
-
-Alle handlers in r mogen gebruikt worden.
-Alle handeler in r, die nog niet voor de handlers van k zijn ge
-
-Als je weet dat s' ++ k in zijn geheel een sublist is van r, dan zitten alle benodigde handlers in r
-
-takevect probably needs to be coerced because we can't compare functions.
-Or we add a Eq type for Handler which is not really equal.
-
-Here we use strict take and drops, since that is what we need and it helps with type inference
+We want to split handlerlist into a non-proc and proc part.
+For this we need strict take and drops therefore we introduce the following
+type families.
 \begin{code}
+-- | type family for splitting type level lists and return HVect
 type family SplitAtVect n xs where
   SplitAtVect n xs = (HVect (TakeVect n xs), HVect (DropVect n xs))
 
-splitVect' :: SNat n -> HVect xs -> SplitAtVect n xs
-splitVect' n xs = (takeVect n xs, dropVect n xs)
-
+-- | Type family to take elements from a source list. This type
+--  only succeeds when the source list is at least of size n.
+-- Therefore having the garuantee/invariant that the length (TakeVec n xs) == n.
+-- Which is different from term-level take in the prelude.
+-- Note that this invariant is not always inferred by the compiler.
 type family TakeVect n xs where
   TakeVect Zero xs = '[]
   TakeVect (Succ m) (x ': xs) = x ': TakeVect m xs
 
+-- | Type family that only succeeds when the source list is
+-- at least of size n.
+-- Which is different from term-level drop in the prelude.
 type family DropVect n xs where
   DropVect Zero xs = xs
   DropVect (Succ m) (x ': xs) = DropVect m xs
 
+-- | General type family for splitting type level lists.
 type family SplitVect n xs where
   SplitVect n xs = '(TakeVect n xs, DropVect n xs)
 
+-- | Take the first n elements HVect xs which has a size of
+-- at least n.
 takeVect :: SNat n -> HVect xs -> HVect (TakeVect n xs)
 takeVect SZero xs = HNil
 takeVect (SSucc m) (r :&: rs) = r :&: (takeVect m rs)
 
+-- | Drop the first n elements HVect xs which has a size of
+-- at least n.
 dropVect :: SNat n -> HVect xs -> HVect (DropVect n xs)
 dropVect SZero xs = xs
 dropVect (SSucc m) (r :&: rs) = dropVect m rs
 
+-- | Split the HVect at position n without names for the type level lists
+-- of the return vectors. The source vector needs to be at least of size n.
+splitVect' :: SNat n -> HVect xs -> SplitAtVect n xs
+splitVect' n xs = (takeVect n xs, dropVect n xs)
+
+-- | Split the HVect at position n with the names for the type level lists of
+-- the return vector. The source vector needs to be at least of size n.
 splitVect :: (DropVect n ss ~ ks, TakeVect n ss ~ ss') => SNat n -> HVect ss -> (HVect ss', HVect ks)
 splitVect n xs = splitVect' n xs
 \end{code}
@@ -669,7 +649,6 @@ something related to the thing you are supposed to do, but not making any progre
 
 lesson: Dependent types: are you depending on types or are you a dependent type.
 
-SHOW: tillProc and getProcContent is a nice example of how I've been able to create polymorphic function which have different requirements.
+lesson: holes are beautiful
 
-lesson: are beautiful holes
 lesson: when working with constraints just write to fucntion and copy the type signature, and refine it bit by bit.
