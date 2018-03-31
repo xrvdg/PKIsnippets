@@ -45,7 +45,7 @@ runUI :: (LastMember (FP.Proc r) effs) => TPG.Window -> Eff (UI ': effs) a -> Ef
 runUI w = interpret (\(LiftUI ui) -> FP.liftIO $ TPG.runUI w ui)
 \end{code}
 \begin{code}
-onEventProcess  :: forall n s r a b effs. (FP.ProcConstraint n s r, Serializable a, Member UI effs, LastMember (FP.Proc r) effs) => TPG.Event a -> (a -> Eff s b) -> (b -> TPG.UI ()) -> Eff effs ()
+onEventProcess  :: (FP.ProcConstraint n s r, Serializable a, Member UI effs, LastMember (FP.Proc r) effs) => TPG.Event a -> (a -> Eff s b) -> (b -> TPG.UI ()) -> Eff effs ()
 onEventProcess event handler callback = void $  do
        (callbackev, fire) <- FP.liftIO TPG.newEvent
        let pt = processTask fire handler

@@ -146,6 +146,7 @@ instance SNatRep n => SNatRep ('Succ n) where
     getSNat = SSucc getSNat
 \end{code}
 
+Even the trivially true cases need to be explicitely encoded.
 \begin{code}
 class (SNatRep n, n ~ LenVect (TillProc s), SubListRep (FlattenProc s) (FlattenProc s), SubListRep (FlattenProc s) r, SubListRep r r) => ProcConstraint n s r where
 
@@ -170,13 +171,13 @@ spawn eff = sendL (Spawn getSNat getSubList eff)
 runIO :: (LastMember (Proc r) effs) => (a -> Eff '[Proc r] b) -> Eff effs (a -> IO ())
 runIO = sendL . RunIO
 
-expect :: (DS.Serializable a, LastMember (Proc ks) r) => Eff r a
+expect :: (DS.Serializable a, LastMember (Proc r) effs) => Eff effs a
 expect = sendL Expect
 
-say :: (LastMember (Proc ks) r) => String -> Eff r ()
+say :: (LastMember (Proc r) effs) => String -> Eff effs ()
 say = sendL . Say
 
-send :: (DS.Serializable a, LastMember (Proc ks) r) => PID -> a -> Eff r ()
+send :: (DS.Serializable a, LastMember (Proc r) effs) => PID -> a -> Eff effs ()
 send pid a = sendL (Send pid a)
 \end{code}
 
