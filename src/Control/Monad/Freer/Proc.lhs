@@ -4,6 +4,7 @@
 To allow the definition of effects
 \begin{code}
 {-# language GADTs #-}
+{-# language RankNTypes #-}
 \end{code}
 Type families are used heavy for all kinds of dependently typed programming.
 For the more difficult cases typefamilydependencies helps the compiler resolve it.
@@ -24,11 +25,18 @@ required to be able to work with Member, Lastmember
 \end{code}
 \begin{code}
 {-# language ScopedTypeVariables #-}
+{-# language MultiParamTypeClasses #-}
+{-# language FlexibleInstances #-}
+{-# language UndecidableInstances #-}
+{-# language PolyKinds #-}
+{-# language FunctionalDependencies #-}
 \end{code}
 \begin{code}
-module Control.Monad.Freer.Proc (runProc, spawn, call, sendIO) where
-import Control.Monad.Freer
+module Control.Monad.Freer.Proc (ProcConstraint, runIO, runProcess, TillProc, LenVect, SNatRep, SubListRep, FlattenProc, Proc, expect, runProc, say, spawn, call, send, liftIO) where
+import Control.Monad.Freer hiding (send)
+import qualified Control.Monad.Freer as F
 import qualified Control.Distributed.Process as DP
+import qualified Control.Distributed.Process.Node as Node
 import qualified Control.Distributed.Process.Serializable as DS
 \end{code}
 
@@ -64,6 +72,7 @@ type PID = DP.ProcessId
 data Proc (r :: [* -> *]) a where
   Spawn ::  (fs ~ FlattenProc s, ss ~ TillProc s, n ~ LenVect ss) => SNat n -> SubList fs r -> Eff s () -> Proc r PID
   Call ::  (fs ~ FlattenProc s, ss ~ TillProc s, n ~ LenVect ss) => SNat n -> SubList fs r -> Eff s a -> Proc r a
+  RunIO ::  (a -> Eff '[Proc r] b) -> Proc r (a -> IO ())
   Send  :: DS.Serializable a => PID -> a ->  Proc r ()
   Expect :: DS.Serializable a => Proc r a
   LiftIO :: IO a -> Proc r a
@@ -71,17 +80,21 @@ data Proc (r :: [* -> *]) a where
 \end{code}
 
 \begin{code}
--- | Handler which translates Proc commands into the Process monad operations.
-runProc :: HVect (HandlerList r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
-runProc hl effs = translate (procCases hl) effs
+runProcess :: Node.LocalNode -> HVect (HandlerList r) -> Eff '[Proc r] a -> IO ()
+runProcess node hl effs = Node.runProcess node $ void (runM (runProc node hl effs))
 
-procCases :: HVect (HandlerList r) -> Proc r a -> DP.Process a
-procCases hl (Spawn n sl eff) = procHandler (DP.spawnLocal . void) n (convertSublist sl) hl eff
-procCases hl (Call n sl eff) = procHandler DP.callLocal n (convertSublist sl) hl eff
-procCases _ (LiftIO io) = DP.liftIO io
-procCases _ (Send pid a) = DP.send pid a
-procCases _ Expect = DP.expect
-procCases _ (Say str) = DP.say str
+-- | Handler which translates Proc commands into the Process monad operations.
+runProc :: Node.LocalNode -> HVect (HandlerList r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
+runProc node hl effs = translate (procCases node hl) effs
+
+procCases :: Node.LocalNode -> HVect (HandlerList r) -> Proc r a -> DP.Process a
+procCases node hl (Spawn n sl eff) = procHandler node (DP.spawnLocal . void) n (convertSublist sl) hl eff
+procCases node hl (Call n sl eff) = procHandler node DP.callLocal n (convertSublist sl) hl eff
+procCases _ _ (LiftIO io) = DP.liftIO io
+procCases node  hl (RunIO eff) = return (\a -> runProcess node hl (eff a))
+procCases _ _ (Send pid a) = DP.send pid a
+procCases _ _ Expect = DP.expect
+procCases _ _  (Say str) = DP.say str
 
 \end{code}
 
@@ -98,7 +111,7 @@ The freer-simple library has support for sending to arbitrary member or the last
 We need to be able to send to the last member, but don't require that the last member is a monad.
 \begin{code}
 sendL :: (LastMember l effs) => l a -> Eff effs a
-sendL = send
+sendL = F.send
 \end{code}
 
 Lesson: sometimes specialized is a bad thing since the compiler cannot inference. Other times specialization
@@ -134,27 +147,35 @@ instance SNatRep n => SNatRep ('Succ n) where
 \end{code}
 
 \begin{code}
-call :: (
-  SNatRep n,
-  ss ~ (TillProc s),
-  n ~ LenVect ss,
-  LastMember (Proc r) effs,
-  fhs ~ FlattenProc s,
-  SubListRep fhs r)
-     => Eff s a -> Eff effs a
-call eff = sendL (Call getSNat getSubList eff)
+class (SNatRep n, n ~ LenVect (TillProc s), SubListRep (FlattenProc s) r) => ProcConstraint n s r where
 
-spawn :: (
+call :: (ProcConstraint n s r, LastMember (Proc r) effs) => Eff s a -> Eff effs a
+call eff = sendL (Call getSNat getSubList eff)
+\end{code}
+
   SNatRep n,
   ss ~ (TillProc s),
   n ~ LenVect ss,
-  LastVect s ~ '[Proc ks],
   LastMember (Proc r) effs,
   fhs ~ FlattenProc s,
   SubListRep fhs r)
+
+\begin{code}
+spawn :: (ProcConstraint n s r, LastMember (Proc r) effs)
      => Eff s () -> Eff effs PID
 spawn eff = sendL (Spawn getSNat getSubList eff)
 
+runIO :: (LastMember (Proc r) effs) => (a -> Eff '[Proc r] b) -> Eff effs (a -> IO ())
+runIO = sendL . RunIO
+
+expect :: (DS.Serializable a, LastMember (Proc ks) r) => Eff r a
+expect = sendL Expect
+
+say :: (LastMember (Proc ks) r) => String -> Eff r ()
+say = sendL . Say
+
+send :: (DS.Serializable a, LastMember (Proc ks) r) => PID -> a -> Eff r ()
+send pid a = sendL (Send pid a)
 \end{code}
 
 The unsafeCoerce are used here for two reasons.
@@ -168,8 +189,8 @@ procHandler :: forall a b fs ss hr fhs n s ks r. (
    hr ~ HandlerList r,
    fhs ~ HandlerList fs,
    ks ~ GetProcContent s) =>
-   (DP.Process a -> DP.Process b) -> SNat n -> SubList fhs hr -> HVect hr -> Eff s a -> DP.Process b
-procHandler f n sl hl eff = f (runM $ runProc ks' (unsafeCoerce (runListL ss' eff)))
+   Node.LocalNode -> (DP.Process a -> DP.Process b) -> SNat n -> SubList fhs hr -> HVect hr -> Eff s a -> DP.Process b
+procHandler node f n sl hl eff = f (runM $ runProc node ks' (unsafeCoerce (runListL ss' eff)))
   where (ss, ks) = extractHandlers n sl hl
         ss' :: HVect (HandlerListL s)
         ss' =  unsafeCoerce ss
@@ -179,7 +200,7 @@ procHandler f n sl hl eff = f (runM $ runProc ks' (unsafeCoerce (runListL ss' ef
 
 lesson: Break through layers of abstraction. Usually you do not want to have to know how something is implemented.
 But when using unsafeCoerce, or other tricks to reduce code or even worse type level hacking, just peel back the curtains.
-In this library we do make use of some properties of OpenUnion and effect code specific. The implementation is
+In this library we do make use of som
 perfect for what we want just the provided interface is not exactly what we need.
 
 lesson: implicitparams still requires passing the argument sometime and also gives you more
@@ -193,8 +214,8 @@ This could be fixed by introducing an spawnIO/callIO functions or by going throu
 and puts a DP.liftIO before it. Maybe even generalizing it, by having a spawn function which you pass how it should reintepret it. A reintepret last.
 This would require writing a replaceRelay function specialized to LastMember.
 \begin{code}
-sendIO :: (LastMember (Proc r) effs) => IO a -> Eff effs a
-sendIO = sendL . LiftIO
+liftIO :: (LastMember (Proc r) effs) => IO a -> Eff effs a
+liftIO = sendL . LiftIO
 \end{code}
 
 Since by convention we only use the last Proc for handling, when we flatten
@@ -203,7 +224,7 @@ last element rather than every occurence of Proc made it easier to work
 with the rest of type instances and code that assumes that proc is the last
 entry.
 \begin{code}
-type family FlattenProc xs where
+type family FlattenProc (xs :: [* -> *]) where
   FlattenProc '[Proc r] = r
   FlattenProc '[] = '[]
   FlattenProc (x ': xs) = x ': FlattenProc xs
