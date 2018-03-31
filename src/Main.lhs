@@ -26,7 +26,7 @@ import Unsafe.Coerce
 main :: IO ()
 main = startApp setup
 
-setup :: (r ~ '[TPGEff.UI, Proc '[]], ProcConstraint n '[] '[], ProcConstraint n '[Proc '[]] '[]) => Window -> Eff r ()
+setup :: Window -> Eff '[TPGEff.UI, Proc '[]] ()
 setup w = do
   cv <- controlView
   void $ TPGEff.liftUI (do
