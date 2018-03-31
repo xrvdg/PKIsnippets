@@ -1,15 +1,15 @@
 \begin{code}
 {-# language FlexibleContexts #-}
-{-# language DataKinds #-}
+{-# language DataKinds, TypeOperators #-}
 {-# language TypeFamilies #-}
 {-# language RankNTypes #-}
 {-# language GADTs #-}
 {-# language ConstraintKinds #-}
 {-# language MultiParamTypeClasses #-}
 {-# language ScopedTypeVariables #-}
-module TPGEff () where
+module TPGEff (runUI, UI, onEventProcess, liftUI) where
 import qualified Graphics.UI.Threepenny as TPG
-import Control.Monad.Freer
+import Control.Monad.Freer as F
 import Control.Monad (void)
 import qualified Control.Monad.Freer.Proc as FP
 import Control.Distributed.Process.Serializable (Serializable)
@@ -40,9 +40,11 @@ data UI a where
 liftUI :: (Member UI effs) => TPG.UI a -> Eff effs a
 liftUI = send . LiftUI
 
+runUI :: (LastMember (FP.Proc r) effs) => TPG.Window -> Eff (UI ': effs) a -> Eff effs a
+runUI w = interpret (\(LiftUI ui) -> FP.liftIO $ TPG.runUI w ui)
 \end{code}
 \begin{code}
-onEventProcess  :: forall a n s r effs b. (FP.ProcConstraints n s r, Serializable a, Member UI effs, LastMember (FP.Proc r) effs) => TPG.Event a -> (a -> Eff s b) -> (b -> TPG.UI ()) -> Eff effs ()
+onEventProcess  :: (FP.ProcConstraint n s r, FP.ProcConstraint n s s, Serializable a, Member UI effs, LastMember (FP.Proc r) effs) => TPG.Event a -> (a -> Eff s b) -> (b -> TPG.UI ()) -> Eff effs ()
 onEventProcess event handler callback = void $  do
        (callbackev, fire) <- FP.liftIO TPG.newEvent
        let pt = processTask fire handler

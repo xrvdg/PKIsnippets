@@ -1,6 +1,9 @@
 \begin{code}
   {-# LANGUAGE OverloadedStrings #-}
   {-# LANGUAGE RecursiveDo #-}
+  {-# LANGUAGE DataKinds #-}
+  {-# LANGUAGE FlexibleContexts #-}
+  {-# LANGUAGE MonoLocalBinds #-}
   module Control (
     controlView
   )
@@ -9,10 +12,11 @@
   import qualified Data.Text as T
   import Graphics.UI.Threepenny as GUT
   import qualified Forms.AddRemove as ARF
+  import Control.Monad.Freer
+  import Control.Monad.Freer.Proc as FP
   import Control.Concurrent (threadDelay)
-  import App
-  import TPGProcess
-  import Control.Monad.Identity
+  import Control.Monad (void)
+  import TPGEff
 \end{code}
 
 
@@ -27,16 +31,16 @@ Where in ADD the second is dependent on the first.
                    AddLink String String | RmLink String String |
                    AddRel String String | RmRel String String deriving Show
 
-  delayedShow :: (Show a) => a -> ProcessNonUI () String
-  delayedShow a = liftIO (threadDelay delay) >> return  (show a ++ show delay)
+  delayedShow :: (Show a) => a -> Eff '[Proc '[]] String
+  delayedShow a = FP.liftIO (threadDelay delay) >> return (show a ++ show delay)
     where delay = 5000000
 
-  controlView :: (Member UI effs) => Eff effs Element
+  controlView :: (ProcConstraint n '[] r, Member TPGEff.UI effs, LastMember (Proc r) effs) => Eff effs Element
   controlView = do
-                   regular <- sendM $ ARF.mkAddRemove "regular"
-                   status <-  sendM $ string "No status yet"
-                   onEventProcess (ARF.ev regular) (const ()) delayedShow (\b -> element status # set text b)
-                   sendM $ do
+                   regular <- TPGEff.liftUI $ ARF.mkAddRemove "regular"
+                   status <-  TPGEff.liftUI $ string "No status yet"
+                   onEventProcess (ARF.ev regular) delayedShow (\b -> void $ element status # set text b)
+                   TPGEff.liftUI $ do
                                bCurrent <- stepper Nothing (ARF.getText ARF.isADD <$> ARF.ev regular)
                                parent <- ARF.mkAddRemove "parent"
                                child <- ARF.mkAddRemove "child"
