@@ -38,10 +38,6 @@ required to be able to work with Member, Lastmember
 {-# language MultiParamTypeClasses, FlexibleInstances #-}
 \end{code}
 
-We need polykinds for the sublist and lastvect since we use them on both [*] as [*->*]
-\begin{code}
-{-# language PolyKinds #-}
-\end{code}
 
 Required for the splitvect handling
 \begin{code}
@@ -63,16 +59,10 @@ import Control.Distributed.Process.Backend.SimpleLocalnet (initializeBackend, ne
 import Unsafe.Coerce
 \end{code}
 
-TODO: What was the reason to have our own HVect.
-  -> The hope was by changing the kind of HVect that it would be possible to get
-     type inference. This however was not due to the limitation of HVect.
-Defining our own HVect in this file doesn't work since we use polykinds
-data HVect (xs :: [*]) where
-  HNil :: HVect '[]
-  (:&:) :: k -> HVect ts -> HVect (k ': ts)
-
 \begin{code}
 import Data.HVect as HV
+import Data.HVect.Utils
+import Data.SubList
 \end{code}
 Below is required for the test
 \begin{code}
@@ -172,34 +162,7 @@ runHandlersM hl eff = runM (runListL hl eff)
 
 TODO: lesson: don't try to combine -> substract
 
-The following type families are not required since there are more specialized type families that have overlap with them.
-The reason they are still included is because they have been useful during the exploratory phase when coming
-up with specialized type families.
-\begin{code}
-type family AppendVect xs ys where
-  AppendVect '[] bs = bs
-  AppendVect (a ': as) bs = a ': (AppendVect as bs)
 
-type family InitVect xs :: [k] where
-   InitVect '[x] = '[]
-   InitVect (t ': ts) = t ': (InitVect ts)
-
-type family LTE n m where
-  LTE Zero Zero = 'True
-  LTE Zero (Succ Zero) = 'True
-  LTE n Zero = 'False
-  LTE (Succ n) (Succ m) = LTE n m
-\end{code}
-
-At first glance LastVect seem to perform the same operation as LastMember from freer-simple.
-This is not the case, Last Member is only a type level computation using empty class/instances.
-We sometimes need the last element of a list for type checking even though we do not care which
-element this is (runListL). LastMember is about forcing the last member of a list.
-\begin{code}
-type family LastVect xs :: [k] where
-   LastVect '[x] = '[x]
-   LastVect (t ': ts) = LastVect ts
-\end{code}
 
 This is a verbatim copy of the SNatRep inside HVect, but the library author sadly did not export it.
 \begin{code}
@@ -283,30 +246,6 @@ testIORun2 :: IO ()
 testIORun2 = runHandlersM (Handler runConsole' :&: HNil) testIO
 \end{code}
 
-We want to be able that we can reduce the required effects. To be able to determine whether
-the parent procedure has these handlers and to make this subset selection automatically from
-the perspective of the library user we need SubList.
-The dataype encodes the proof and SubListRep gives us a method the extract this encoding.
-\begin{code}
--- | Datatype to encode in what way xs is a sublist of ys.
--- Note that this is about sublist and not prefix or subsequences.
-data SubList (xs :: k) (ys :: k) where
-  Base :: SubList '[] '[]
-  Keep :: SubList xs ys -> SubList (x ': xs) (x ': ys)
-  Drop :: SubList xs ys -> SubList xs (y ': ys)
-
-class SubListRep xs ys where
-  getSubList :: SubList xs ys
-
-instance SubListRep '[] '[] where
-  getSubList = Base
-
-instance {-# OVERLAPPING #-} SubListRep xs ys =>  SubListRep  (x ': xs) (x ': ys) where
-  getSubList = Keep getSubList
-
-instance {-# OVERLAPPABLE #-} SubListRep xs ys =>  SubListRep xs (y ': ys) where
-  getSubList = Drop getSubList
-\end{code}
 
 While overlappinginstances is a little bit frowned up on. In this case
 writing an overlapping instance is easier than coming up with a non-overlapping encoding.
@@ -315,19 +254,7 @@ might lean too heavy on singleton specific properties.
 See the earlier remark about singletons, and why those do not work as-is with this
 library.
 
-\begin{code}
--- | Extract the sublist given the larger list with explicit evidence passing.
-extractHVect' :: SubList xs ys -> HVect ys -> HVect xs
-extractHVect' Base r = HNil
-extractHVect' (Keep sl) (r :&: rs) = r :&: (extractHVect' sl rs)
-extractHVect' (Drop sl) (r :&: rs) = extractHVect' sl rs
-
--- | Extract the sublist given the larger list with implicit evidence passing.
-extractHVect :: (SubListRep xs ys) => HVect ys -> HVect xs
-extractHVect = extractHVect' (getSubList)
-\end{code}
-
-This is a specialized version of extractHVect' since GHC type inference is not good enough.
+This is a specialized version of 'extractHVect' since GHC type inference is not good enough.
 To overcome this limitation we need to wrap clauses with unsafeCoerce.
 \begin{code}
 -- | Specialized version of 'extractHVect' for 'Handerlist'
@@ -354,11 +281,6 @@ extractHandlers n sl rs = splitVect n ss
 lesson: use ScopedTypeVariables (and forall) to guide the compiler what the types should be.
 This is often easier and requires less code than splitting it out into a seperate function.
 
-\begin{code}
-type family LenVect xs where
-  LenVect '[] = Zero
-  LenVect (t ': ts) = Succ (LenVect ts)
-\end{code}
 
 Lesson: keep your steps as simple as possible. That way you might be able to use types without coercing
 Lesson: You don't have to coerce if a type synonym suffices.
@@ -579,58 +501,6 @@ type family FlattenProc xs where
   FlattenProc '[Proc r] = r
   FlattenProc '[] = '[]
   FlattenProc (x ': xs) = x ': FlattenProc xs
-\end{code}
-
-
-We want to split handlerlist into a non-proc and proc part.
-For this we need strict take and drops therefore we introduce the following
-type families.
-\begin{code}
--- | type family for splitting type level lists and return HVect
-type family SplitAtVect n xs where
-  SplitAtVect n xs = (HVect (TakeVect n xs), HVect (DropVect n xs))
-
--- | Type family to take elements from a source list. This type
---  only succeeds when the source list is at least of size n.
--- Therefore having the garuantee/invariant that the length (TakeVec n xs) == n.
--- Which is different from term-level take in the prelude.
--- Note that this invariant is not always inferred by the compiler.
-type family TakeVect n xs where
-  TakeVect Zero xs = '[]
-  TakeVect (Succ m) (x ': xs) = x ': TakeVect m xs
-
--- | Type family that only succeeds when the source list is
--- at least of size n.
--- Which is different from term-level drop in the prelude.
-type family DropVect n xs where
-  DropVect Zero xs = xs
-  DropVect (Succ m) (x ': xs) = DropVect m xs
-
--- | General type family for splitting type level lists.
-type family SplitVect n xs where
-  SplitVect n xs = '(TakeVect n xs, DropVect n xs)
-
--- | Take the first n elements HVect xs which has a size of
--- at least n.
-takeVect :: SNat n -> HVect xs -> HVect (TakeVect n xs)
-takeVect SZero xs = HNil
-takeVect (SSucc m) (r :&: rs) = r :&: (takeVect m rs)
-
--- | Drop the first n elements HVect xs which has a size of
--- at least n.
-dropVect :: SNat n -> HVect xs -> HVect (DropVect n xs)
-dropVect SZero xs = xs
-dropVect (SSucc m) (r :&: rs) = dropVect m rs
-
--- | Split the HVect at position n without names for the type level lists
--- of the return vectors. The source vector needs to be at least of size n.
-splitVect' :: SNat n -> HVect xs -> SplitAtVect n xs
-splitVect' n xs = (takeVect n xs, dropVect n xs)
-
--- | Split the HVect at position n with the names for the type level lists of
--- the return vector. The source vector needs to be at least of size n.
-splitVect :: (DropVect n ss ~ ks, TakeVect n ss ~ ss') => SNat n -> HVect ss -> (HVect ss', HVect ks)
-splitVect n xs = splitVect' n xs
 \end{code}
 
 lesson: reusability is low, very low. We have need to define things that have be done a thousand times
