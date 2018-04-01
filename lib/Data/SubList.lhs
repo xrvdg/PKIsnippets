@@ -12,9 +12,10 @@ The sublists have more than parameter.
 \end{code}
 \begin{code}
 {-# language GADTs #-}
+{-# language UndecidableInstances #-}
 \end{code}
 \begin{code}
-module Data.SubList (SubList(..), SubListRep, getSubList) where
+module Data.SubList (SubList(..), SubListRep, SubListRefl, SubListTrans, getSubList) where
 \end{code}
 We want to be able that we can reduce the required effects. To be able to determine whether
 the parent procedure has these handlers and to make this subset selection automatically from
@@ -28,17 +29,26 @@ data SubList (xs :: k) (ys :: k) where
   Keep :: SubList xs ys -> SubList (x ': xs) (x ': ys)
   Drop :: SubList xs ys -> SubList xs (y ': ys)
 
+class (SubListRep xs xs) => SubListRefl xs
+
+instance (SubListRep xs xs) => SubListRefl xs
+
+class (SubListRefl xs, SubListRefl ys, SubListRefl zs, SubListRep xs ys, SubListRep ys zs, SubListRep xs zs) => SubListTrans xs ys zs
+
+instance (SubListRefl xs, SubListRefl ys, SubListRefl zs, SubListRep xs ys, SubListRep ys zs, SubListRep xs zs) => SubListTrans xs ys zs
+
 class SubListRep xs ys where
   getSubList :: SubList xs ys
 
 instance SubListRep '[] '[] where
   getSubList = Base
 
-instance {-# OVERLAPPING #-} SubListRep xs ys =>  SubListRep  (x ': xs) (x ': ys) where
+instance {-# OVERLAPPING #-} (SubListRep xs ys) =>  SubListRep  (x ': xs) (x ': ys) where
   getSubList = Keep getSubList
 
-instance {-# OVERLAPPABLE #-} SubListRep xs ys =>  SubListRep xs (y ': ys) where
+instance {-# OVERLAPPABLE #-} (SubListRep xs ys) =>  SubListRep xs (y ': ys) where
   getSubList = Drop getSubList
+
 \end{code}
 
 While overlappinginstances is a little bit frowned up on. In this case

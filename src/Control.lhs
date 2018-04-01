@@ -35,7 +35,7 @@ Where in ADD the second is dependent on the first.
   delayedShow a = FP.liftIO (threadDelay delay) >> return (show a ++ show delay)
     where delay = 5000000
 
-  controlView :: (ProcConstraint n '[] r, Member TPGEff.UI effs, LastMember (Proc r) effs) => Eff effs Element
+  controlView :: (Member TPGEff.UI effs, HasProc n r effs) => Eff effs Element
   controlView = do
                    regular <- TPGEff.liftUI $ ARF.mkAddRemove "regular"
                    status <-  TPGEff.liftUI $ string "No status yet"

@@ -32,7 +32,7 @@ required to be able to work with Member, Lastmember
 {-# language FunctionalDependencies #-}
 \end{code}
 \begin{code}
-module Control.Monad.Freer.Proc (ProcConstraint, runIO, runProcess, TillProc, LenVect, SNatRep, SubListRep, FlattenProc, Proc, expect, runProc, say, spawn, call, send, liftIO) where
+module Control.Monad.Freer.Proc (HasProc, ProcConstraint, runIO, runProcess, TillProc, LenVect, SNatRep, SubListRep, FlattenProc, Proc, expect, runProc, say, spawn, call, send, liftIO) where
 import Control.Monad.Freer hiding (send)
 import qualified Control.Monad.Freer as F
 import qualified Control.Distributed.Process as DP
@@ -148,9 +148,12 @@ instance SNatRep n => SNatRep ('Succ n) where
 
 Even the trivially true cases need to be explicitely encoded.
 \begin{code}
-class (SNatRep n, n ~ LenVect (TillProc s), SubListRep (FlattenProc s) (FlattenProc s), SubListRep (FlattenProc s) r, SubListRep r r) => ProcConstraint n s r where
+class (ProcConstraint n '[] r, LastMember (Proc r) eff) => HasProc n r eff where
+instance (ProcConstraint n '[] r, LastMember (Proc r) eff) => HasProc n r eff where
 
-instance (SNatRep n, n ~ LenVect (TillProc s), SubListRep (FlattenProc s) (FlattenProc s), SubListRep (FlattenProc s) r, SubListRep r r) => ProcConstraint n s r where
+class (SNatRep n, n ~ LenVect (TillProc s), SubListTrans '[] (FlattenProc s) r) => ProcConstraint n s r where
+
+instance (SNatRep n, n ~ LenVect (TillProc s), SubListTrans '[] (FlattenProc s) r) => ProcConstraint n s r where
 
 call :: (ProcConstraint n s r, LastMember (Proc r) effs) => Eff s a -> Eff effs a
 call eff = sendL (Call getSNat getSubList eff)
