@@ -1,12 +1,10 @@
 directory structure:
 
-\src 
-  Collection of snippets for a effects system that supports concurrency, graph drawing, ThreepennyGUI event handling.
+/lib:
+  This directory contains the concurrent effect handler code
 
-\ops
-  nix snippets to build a container containing neo4j and this project.
+/src:
+  This directory contains the sample application. Which is a simple demos a GUI applications that stays responsive when thread delays are used to showcase that multiple threads are used.
 
-for completeness the sigma.js code is added as submodule.
-Drawing code currently assumes that sigma.js is build in de directory ./sigma.js
-
-Branch: TPGMonadStack should contain the last working version.
+/test:
+ contains test that mainly serve to check whether the desired semantics of the library is achieved.
