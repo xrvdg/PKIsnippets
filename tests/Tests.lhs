@@ -1,4 +1,15 @@
 \begin{code}
+{-# language LambdaCase #-}
+{-# language GADTs #-}
+{-# language FlexibleContexts #-}
+{-# language DataKinds, TypeOperators, TypeApplications #-}
+{-# language RankNTypes #-}
+import Control.Monad.Freer as F
+import Control.Monad.Freer.Proc as FP hiding (send)
+import Control.Monad.Freer.Handler as FH
+import Data.HVect
+import Control.Monad (void)
+import qualified Control.Distributed.Process as DP
 import qualified Control.Distributed.Process.Node as Node
 import Control.Distributed.Process.Backend.SimpleLocalnet (initializeBackend, newLocalNode)
 \end{code}
@@ -6,8 +17,9 @@ Below is required for the test
 \begin{code}
 import qualified Control.Monad.Freer.Reader as FR
 import qualified Control.Monad.Freer.State as FS
-import Control.Monad.IO.Class
 import System.Exit hiding (ExitCode(ExitSuccess))
+
+main = exitSuccess
 \end{code}
 runList testcode
 \begin{code}
@@ -55,10 +67,10 @@ exitSuccess' :: Member Console effs => Eff effs ()
 exitSuccess' = send ExitSuccess
 
 runConsole :: Eff '[Console, IO] a -> IO a
-runConsole = runM . runConsole'
+runConsole = runM . runConsole' id
 
-runConsole' :: (MonadIO m, LastMember m effs) => Eff (Console ': effs) a -> Eff effs a
-runConsole' = interpretM (\case
+runConsole' :: (LastMember m effs) => (forall a. IO a -> m a) -> Eff (Console ': effs) a -> Eff effs a
+runConsole' liftIO = interpretM (\case
   PutStrLn msg -> liftIO $ putStrLn msg
   GetLine -> liftIO $ getLine
   ExitSuccess -> liftIO $ exitSuccess)
@@ -71,12 +83,6 @@ testIO = do putStrLn' "Hello, World"
 
 testIORun :: IO ()
 testIORun = runConsole testIO
-\end{code}
-
-The following is a nice test to check if adding constrains also works
-\begin{code}
-testIORun2 :: IO ()
-testIORun2 = runHandlersM (Handler runConsole' :&: HNil) testIO
 \end{code}
 
 \begin{code}
@@ -93,12 +99,12 @@ testProcIO2 = do
     Node.runProcess node (void testProc)
 
 testProc :: DP.Process ()
-testProc = runM (runProc handlers prog)
+testProc = runProcess handlers prog
   where
     handlers = (Handler (FR.runReader "Hello") :&: Handler (FR.runReader (5 :: Int)) :&: HNil)
     prog = call f
 
-testProc2 :: DP.Process PID
+testProc2 :: DP.Process FP.PID
 testProc2 = runM (runProc handlers prog)
   where
     handlers = (Handler (FR.runReader "Hello") :&: Handler (FR.runReader (5 :: Int)) :&: HNil)
@@ -115,21 +121,21 @@ gh = FR.ask
 \end{code}
 
 \begin{code}
-f :: Eff [FR.Reader String, FR.Reader Int, Proc '[]] ()
+f :: Eff [FR.Reader String, FR.Reader Int, FP.Proc '[]] ()
 f = do s <- FR.ask @String
        i <- FR.ask @Int
-       sendIO $ putStrLn (s ++ show i)
+       liftIO $ putStrLn (s ++ show i)
 \end{code}
 \begin{code}
-g :: Eff '[FR.Reader Int, Proc '[FR.Reader String]] ()
+g :: Eff '[FR.Reader Int, FP.Proc '[FR.Reader String]] ()
 g = do s <- call gh
        i <- FR.ask @Int
-       sendIO $ putStrLn (s ++ show i)
+       liftIO $ putStrLn (s ++ show i)
 
-h :: Eff '[FR.Reader String, Proc '[FR.Reader Int]] ()
+h :: Eff '[FR.Reader String, FP.Proc '[FR.Reader Int]] ()
 h = do i <- call hh
        s <- FR.ask @String
-       sendIO $ putStrLn (s ++ show i)
+       liftIO $ putStrLn (s ++ show i)
 \end{code}
 
 its type should still be a valid instance it just isn't that useful.
@@ -141,8 +147,8 @@ i = do i <- call hh
        sendM $ liftIO $ putStrLn (s ++ show i)
 
 \begin{code}
-j :: Eff '[Proc '[FR.Reader String, FR.Reader Int]] ()
+j :: Eff '[FP.Proc '[FR.Reader String, FR.Reader Int]] ()
 j = do i <- call hh
        s <- call gh
-       sendIO $ putStrLn (s ++ show i)
+       liftIO $ putStrLn (s ++ show i)
 \end{code}

@@ -32,7 +32,7 @@ required to be able to work with Member, Lastmember
 {-# language FunctionalDependencies #-}
 \end{code}
 \begin{code}
-module Control.Monad.Freer.Proc (HasProc, ProcConstraint, runIO, runProcess, TillProc, LenVect, SNatRep, SubListRep, FlattenProc, Proc, expect, runProc, say, spawn, call, send, liftIO) where
+module Control.Monad.Freer.Proc (PID, HasProc, ProcConstraint, runIO, runProcess, TillProc, LenVect, SNatRep, SubListRep, FlattenProc, Proc, expect, runProc, say, spawn, call, send, liftIO) where
 import Control.Monad.Freer hiding (send)
 import qualified Control.Monad.Freer as F
 import qualified Control.Distributed.Process as DP
@@ -80,9 +80,11 @@ data Proc (r :: [* -> *]) a where
 \end{code}
 
 \begin{code}
+
 runProcess :: Node.LocalNode -> HVect (HandlerList r) -> Eff '[Proc r] a -> IO ()
 runProcess node hl effs = Node.runProcess node $ void (runM (runProc node hl effs))
 
+-- TODO: Write a proc with some state s.t. it is easier to switch.
 -- | Handler which translates Proc commands into the Process monad operations.
 runProc :: Node.LocalNode -> HVect (HandlerList r) -> Eff '[Proc r] a -> Eff '[DP.Process] a
 runProc node hl effs = translate (procCases node hl) effs
